@@ -44,3 +44,8 @@ dotnet publish -c Release -r win-x64 --self-contained
 ## Security notes
 
 Agent names are validated against a strict whitelist (single command tokens only — no shell metacharacters) before they are ever passed to a command line, both when you add them and again at launch time, since they are interpolated into a `cmd.exe` invocation.
+
+## License
+
+Released under the [MIT License](LICENSE).
+
