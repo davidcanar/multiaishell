@@ -1,0 +1,288 @@
+<Window x:Class="MultiAI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+         xmlns:local="clr-namespace:MultiAI"
+         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+         mc:Ignorable="d"
+         Title="MultiAI - OpenCode Grid Manager"
+        Height="900" Width="1400"
+        Icon="MultiAI.ico"
+        Background="#1e1e1e"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        SnapsToDevicePixels="True"
+         UseLayoutRounding="True"
+         StateChanged="MainWindow_StateChanged">
+    <WindowChrome.WindowChrome>
+        <WindowChrome GlassFrameThickness="0"
+                      UseAeroCaptionButtons="False"
+                      ResizeBorderThickness="4" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style TargetType="Button" x:Key="ToolbarButton">
+            <Setter Property="Background" Value="#3d3d3d" />
+            <Setter Property="Foreground" Value="#ccc" />
+            <Setter Property="BorderBrush" Value="#555" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.85" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="TextBox" x:Key="ToolbarTextBox">
+            <Setter Property="Background" Value="#3d3d3d" />
+            <Setter Property="Foreground" Value="#ccc" />
+            <Setter Property="BorderBrush" Value="#555" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Width" Value="50" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="Label" x:Key="ToolbarLabel">
+            <Setter Property="Foreground" Value="#aaa" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="4,0" />
+        </Style>
+
+        <Style TargetType="Separator" x:Key="ToolbarSeparator">
+            <Setter Property="Background" Value="#555" />
+            <Setter Property="Width" Value="1" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Margin" Value="6,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Window chrome buttons (minimize, maximize, close) -->
+        <Style TargetType="Button" x:Key="WindowButton">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#ccc" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderThickness="0"
+                                CornerRadius="0">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#505050" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Button" x:Key="CloseWindowButton" BasedOn="{StaticResource WindowButton}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#c42b1c" />
+                    <Setter Property="Foreground" Value="#fff" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="WindowBorder" BorderBrush="#444" BorderThickness="1">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ========== TOOLBAR (draggable region) ========== -->
+        <Border Grid.Row="0" Background="#2d2d2d" BorderBrush="#444" BorderThickness="0,0,0,1"
+                MouseLeftButtonDown="Toolbar_MouseLeftButtonDown"
+                MouseDown="Toolbar_MouseDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,6">
+                <!-- App title with icon -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <Image Source="MultiAI.ico" Width="20" Height="20" Margin="0,0,6,0"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock Text="MultiAI"
+                               Foreground="#4ec9b0"
+                               FontSize="16"
+                               FontWeight="Bold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Separator Style="{StaticResource ToolbarSeparator}" />
+
+                <!-- Grid Dimensions -->
+                <Label Content="Grid:" Style="{StaticResource ToolbarLabel}" />
+                <TextBox x:Name="RowsBox" Text="2" Style="{StaticResource ToolbarTextBox}" ToolTip="Number of rows" />
+                <TextBlock Text="×" Foreground="#888" FontSize="14" VerticalAlignment="Center" Margin="2,0" />
+                <TextBox x:Name="ColsBox" Text="3" Style="{StaticResource ToolbarTextBox}" ToolTip="Number of columns" />
+
+                <Button x:Name="ApplyGridButton"
+                        Content="Apply"
+                        Style="{StaticResource ToolbarButton}"
+                        Background="#2d5d8d"
+                        Foreground="#fff"
+                        ToolTip="Rebuild the grid with the specified dimensions"
+                        Click="ApplyGridButton_Click" />
+
+                <Separator Style="{StaticResource ToolbarSeparator}" />
+
+                <!-- Preset buttons -->
+                <Button Content="1×1" Style="{StaticResource ToolbarButton}"
+                        ToolTip="Single session" Click="PresetButton_Click" Tag="1,1" />
+                <Button Content="2×2" Style="{StaticResource ToolbarButton}"
+                        ToolTip="4 sessions (2×2 grid)" Click="PresetButton_Click" Tag="2,2" />
+                <Button Content="3×3" Style="{StaticResource ToolbarButton}"
+                        ToolTip="9 sessions (3×3 grid)" Click="PresetButton_Click" Tag="3,3" />
+                <Button Content="2×3" Style="{StaticResource ToolbarButton}"
+                        ToolTip="6 sessions (2×3 grid)" Click="PresetButton_Click" Tag="2,3" />
+                <Button Content="3×2" Style="{StaticResource ToolbarButton}"
+                        ToolTip="6 sessions (3×2 grid)" Click="PresetButton_Click" Tag="3,2" />
+                <Button Content="1×2" Style="{StaticResource ToolbarButton}"
+                        ToolTip="2 sessions side by side" Click="PresetButton_Click" Tag="1,2" />
+                <Button Content="4×4" Style="{StaticResource ToolbarButton}"
+                        ToolTip="16 sessions (4×4 grid)" Click="PresetButton_Click" Tag="4,4" />
+
+                <Separator Style="{StaticResource ToolbarSeparator}" />
+
+                <!-- Save / Load -->
+                <Button x:Name="SaveButton"
+                        Content="💾 Save"
+                        Style="{StaticResource ToolbarButton}"
+                        ToolTip="Save the current grid layout"
+                        Click="SaveButton_Click" />
+                <Button x:Name="LoadButton"
+                        Content="📂 Load"
+                        Style="{StaticResource ToolbarButton}"
+                        ToolTip="Load a saved grid layout"
+                        Click="LoadButton_Click" />
+
+                <Separator Style="{StaticResource ToolbarSeparator}" />
+
+                <!-- Launch All / Stop All -->
+                <ComboBox x:Name="ToolbarAgentCombo"
+                          Width="105"
+                          Height="22"
+                          Margin="0,0,4,0"
+                          FontSize="12"
+                          Foreground="#e0e0e0"
+                          Background="#3d3d3d"
+                          BorderBrush="#555"
+                          IsEditable="True"
+                          ToolTip="Agent to use when launching all sessions" />
+
+                <Button x:Name="LaunchAllButton"
+                        Content="▶ Launch All"
+                        Style="{StaticResource ToolbarButton}"
+                        Background="#2d6d2d"
+                        Foreground="#fff"
+                        ToolTip="Launch all stopped sessions"
+                        Click="LaunchAllButton_Click" />
+
+                <Button x:Name="StopAllButton"
+                        Content="■ Stop All"
+                        Style="{StaticResource ToolbarButton}"
+                        Background="#6d2d2d"
+                        Foreground="#ff8888"
+                        ToolTip="Stop all running sessions"
+                        Click="ClearAllButton_Click" />
+            </WrapPanel>
+
+                <!-- Window chrome buttons -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="MinimizeButton"
+                            Content="─"
+                            Style="{StaticResource WindowButton}"
+                            ToolTip="Minimize"
+                            Click="MinimizeButton_Click" />
+                    <Button x:Name="MaximizeButton"
+                            Content="□"
+                            Style="{StaticResource WindowButton}"
+                            ToolTip="Maximize"
+                            Click="MaximizeButton_Click" />
+                    <Button x:Name="CloseButton"
+                            Content="✕"
+                            Style="{StaticResource CloseWindowButton}"
+                            ToolTip="Close"
+                            Click="CloseButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ========== SCROLLABLE GRID AREA ========== -->
+        <ScrollViewer Grid.Row="1"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Background="#1a1a1a"
+                      HorizontalAlignment="Stretch">
+            <Grid x:Name="SessionsGrid"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  Margin="4" />
+        </ScrollViewer>
+
+        <!-- ========== STATUS BAR ========== -->
+        <Border Grid.Row="2" Background="#2d2d2d" Padding="8,4" BorderBrush="#444" BorderThickness="0,1,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="StatusBarText"
+                           Grid.Column="0"
+                           Text="Ready"
+                           Foreground="#888"
+                           FontSize="11" />
+
+                <TextBlock x:Name="SessionCountText"
+                           Grid.Column="2"
+                           Text="0 sessions"
+                           Foreground="#888"
+                           FontSize="11" />
+            </Grid>
+        </Border>
+    </Grid>
+    </Border>
+</Window>

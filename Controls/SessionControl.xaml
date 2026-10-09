@@ -1,0 +1,193 @@
+<UserControl x:Class="MultiAI.Controls.SessionControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:MultiAI.Controls"
+             mc:Ignorable="d"
+             d:DesignHeight="400" d:DesignWidth="600"
+             BorderBrush="#555" BorderThickness="1"
+             Background="#1e1e1e"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True">
+
+    <Grid Margin="2">
+        <Grid.RowDefinitions>
+            <!-- Combined header/path/buttons row -->
+            <RowDefinition Height="Auto" />
+            <!-- Console host row (fills remaining space) -->
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Combined Header / Path / Buttons Row -->
+        <Border Grid.Row="0" Background="#2d2d2d" Padding="4" CornerRadius="2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" MinWidth="80" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Status indicator (gray when stopped, green when running) -->
+                <Border x:Name="StatusIndicator"
+                        Grid.Column="0"
+                        Width="10" Height="10"
+                        CornerRadius="5"
+                        Background="#666"
+                        Margin="0,0,6,0"
+                        VerticalAlignment="Center"
+                        ToolTip="Stopped" />
+
+                <!-- Editable session name -->
+                <TextBox x:Name="SessionNameBox"
+                         Grid.Column="1"
+                         Text="Session"
+                         Foreground="#ddd"
+                         Background="#3d3d3d"
+                         BorderBrush="#555"
+                         BorderThickness="1"
+                         FontSize="13"
+                         FontWeight="SemiBold"
+                         Padding="4,2"
+                         VerticalAlignment="Center"
+                         TextWrapping="NoWrap"
+                         GotFocus="SessionNameBox_GotFocus"
+                         LostFocus="SessionNameBox_LostFocus"
+                         KeyDown="SessionNameBox_KeyDown" />
+
+                <!-- Path combo (editable with saved paths) -->
+                <ComboBox x:Name="PathBox"
+                          Grid.Column="2"
+                          IsEditable="True"
+                          DisplayMemberPath="Path"
+                          FontSize="12"
+                          Padding="4,2"
+                          Margin="4,0,0,0"
+                          VerticalAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          BorderBrush="#555"
+                          ToolTip="Type a path or select a saved one. Enter to save. Right-click to add/remove."
+                          KeyDown="PathBox_KeyDown"
+                          LostFocus="PathBox_LostFocus"
+                          SelectionChanged="PathBox_SelectionChanged"
+                          MouseRightButtonUp="PathBox_RightClick" />
+
+                <!-- Browse button -->
+                <Button x:Name="BrowseButton"
+                        Grid.Column="3"
+                        Content="..."
+                        Width="28"
+                        Height="22"
+                        Margin="4,0,0,0"
+                        FontSize="12"
+                        FontWeight="Bold"
+                        Foreground="#ccc"
+                        Background="#3d3d3d"
+                        BorderBrush="#555"
+                        ToolTip="Browse for folder"
+                        Click="BrowseButton_Click" />
+
+                <!-- Agent selector -->
+                <ComboBox x:Name="AgentCombo"
+                          Grid.Column="4"
+                          Width="105"
+                          Height="22"
+                          Margin="4,0,4,0"
+                          FontSize="12"
+                          BorderBrush="#555"
+                          IsEditable="True"
+                          TextSearch.TextPath=""
+                          ToolTip="Select or type a coding agent name. Right-click to add/remove."
+                          KeyDown="AgentCombo_KeyDown"
+                          LostFocus="AgentCombo_LostFocus"
+                          MouseRightButtonUp="AgentCombo_RightClick" />
+
+                <!-- Launch button -->
+                <Button x:Name="LaunchButton"
+                        Grid.Column="5"
+                        Content="▶"
+                        Padding="8,3"
+                        Margin="0,0,4,0"
+                        FontSize="12"
+                        Foreground="#fff"
+                        Background="#2d6d2d"
+                        BorderBrush="#3a8a3a"
+                        BorderThickness="1"
+                        ToolTip="Start the selected coding agent in the specified directory"
+                        Click="LaunchButton_Click" />
+
+                <!-- Stop button -->
+                <Button x:Name="StopButton"
+                        Grid.Column="6"
+                        Content="■"
+                        Padding="8,3"
+                        Margin="0,0,4,0"
+                        FontSize="12"
+                        Foreground="#fff"
+                        Background="#8d2d2d"
+                        BorderBrush="#aa3a3a"
+                        BorderThickness="1"
+                        ToolTip="Stop the running session"
+                        IsEnabled="False"
+                        Click="StopButton_Click" />
+
+                <!-- Open in Explorer button -->
+                <Button x:Name="ExplorerButton"
+                        Grid.Column="7"
+                        Content="📂"
+                        Padding="8,3"
+                        Margin="0,0,4,0"
+                        FontSize="12"
+                        Foreground="#ccc"
+                        Background="#3d3d3d"
+                        BorderBrush="#555"
+                        BorderThickness="1"
+                        ToolTip="Open the working directory in Windows Explorer"
+                        Click="ExplorerButton_Click" />
+
+                <!-- Detach button (pop out embedded console to separate window) -->
+                <Button x:Name="TerminalButton"
+                        Grid.Column="8"
+                        Content="🖥️"
+                        Padding="8,3"
+                        Margin="0,0,4,0"
+                        FontSize="12"
+                        Foreground="#ccc"
+                        Background="#3d3d3d"
+                        BorderBrush="#555"
+                        BorderThickness="1"
+                        ToolTip="Open a terminal window in the working directory"
+                        Click="TerminalButton_Click" />
+
+                <!-- Detach button (pop out embedded console to separate window) -->
+                <Button x:Name="DetachButton"
+                        Grid.Column="9"
+                        Content="🔗"
+                        Padding="8,3"
+                        Margin="0,0,0,0"
+                        FontSize="12"
+                        Foreground="#ccc"
+                        Background="#3d3d3d"
+                        BorderBrush="#555"
+                        BorderThickness="1"
+                        ToolTip="Pop out the console to a separate window"
+                        IsEnabled="False"
+                        Click="DetachButton_Click" />
+            </Grid>
+        </Border>
+
+        <!-- Console Host (fills remaining space) -->
+        <local:ConsoleHost x:Name="ConsoleHostControl"
+                           Grid.Row="1"
+                           Margin="0,2,0,0"
+                           Visibility="Visible" />
+    </Grid>
+
+</UserControl>
