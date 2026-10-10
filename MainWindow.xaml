@@ -203,6 +203,15 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
 
+                <!-- Add a new window/tab to the grid -->
+                <Button x:Name="NewWindowButton"
+                        Content="＋ New Window"
+                        Style="{StaticResource ToolbarButton}"
+                        Background="#2d6d5d"
+                        Foreground="#fff"
+                        ToolTip="Add one session: windows fill up to 4 per row, then start a new row. In Tabs mode this adds a new tab."
+                        Click="NewWindowButton_Click" />
+
                 <Separator Style="{StaticResource ToolbarSeparator}" />
 
                 <!-- Grid Dimensions -->
@@ -221,21 +230,26 @@
 
                 <Separator Style="{StaticResource ToolbarSeparator}" />
 
-                <!-- Preset buttons -->
-                <Button Content="1×1" Style="{StaticResource ToolbarButton}"
-                        ToolTip="Single session" Click="PresetButton_Click" Tag="1,1" />
-                <Button Content="2×2" Style="{StaticResource ToolbarButton}"
-                        ToolTip="4 sessions (2×2 grid)" Click="PresetButton_Click" Tag="2,2" />
-                <Button Content="3×3" Style="{StaticResource ToolbarButton}"
-                        ToolTip="9 sessions (3×3 grid)" Click="PresetButton_Click" Tag="3,3" />
-                <Button Content="2×3" Style="{StaticResource ToolbarButton}"
-                        ToolTip="6 sessions (2×3 grid)" Click="PresetButton_Click" Tag="2,3" />
-                <Button Content="3×2" Style="{StaticResource ToolbarButton}"
-                        ToolTip="6 sessions (3×2 grid)" Click="PresetButton_Click" Tag="3,2" />
-                <Button Content="1×2" Style="{StaticResource ToolbarButton}"
-                        ToolTip="2 sessions side by side" Click="PresetButton_Click" Tag="1,2" />
-                <Button Content="4×4" Style="{StaticResource ToolbarButton}"
-                        ToolTip="16 sessions (4×4 grid)" Click="PresetButton_Click" Tag="4,4" />
+                <!-- Grid presets -->
+                <ComboBox x:Name="PresetsCombo"
+                          Width="90"
+                          Height="22"
+                          FontSize="12"
+                          Foreground="#e0e0e0"
+                          Background="#3d3d3d"
+                          BorderBrush="#555"
+                          ToolTip="Pick a grid preset"
+                          SelectedIndex="0"
+                          SelectionChanged="PresetsCombo_SelectionChanged">
+                    <ComboBoxItem Content="Presets" IsEnabled="False" />
+                    <ComboBoxItem Content="1×1" Tag="1,1" />
+                    <ComboBoxItem Content="1×2" Tag="1,2" />
+                    <ComboBoxItem Content="2×2" Tag="2,2" />
+                    <ComboBoxItem Content="2×3" Tag="2,3" />
+                    <ComboBoxItem Content="3×2" Tag="3,2" />
+                    <ComboBoxItem Content="3×3" Tag="3,3" />
+                    <ComboBoxItem Content="4×4" Tag="4,4" />
+                </ComboBox>
 
                 <Separator Style="{StaticResource ToolbarSeparator}" />
 
@@ -316,8 +330,11 @@
         </Border>
 
         <!-- ========== SCROLLABLE GRID AREA ========== -->
-        <ScrollViewer Grid.Row="1"
-                      HorizontalScrollBarVisibility="Auto"
+        <!-- Horizontal scrolling is disabled on purpose: cells shrink to share
+             the full width instead of pushing the grid past the viewport. -->
+        <ScrollViewer x:Name="SessionsScroll"
+                      Grid.Row="1"
+                      HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto"
                       Background="#1a1a1a"
                       HorizontalAlignment="Stretch">

@@ -148,11 +148,25 @@ public partial class MainWindow : Window
         session.PropertyChanged += OnSessionStatusChanged;
 
         var control = new SessionControl(session) { Margin = new Thickness(2) };
+        control.CloseRequested += OnSessionCloseRequested;
+        System.Windows.Automation.AutomationProperties.SetAutomationId(control, "SessionCell");
         Grid.SetRow(control, row);
         Grid.SetColumn(control, col);
 
         _sessionControls.Add(control);
         SessionsGrid.Children.Add(control);
+    }
+
+    /// <summary>
+    /// Resizes a session's embedded console after layout settles. Needed when a
+    /// session becomes visible again (tab switch / view switch): a hidden
+    /// HwndHost doesn't track layout changes, so its console window would keep
+    /// its old size until the user clicked into it.
+    /// </summary>
+    private void ResizeControlConsole(SessionControl ctrl)
+    {
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+            new Action(() => ctrl.ResizeConsole()));
     }
 
     // ——— Tiles / Tabs view switching ———
@@ -197,6 +211,7 @@ public partial class MainWindow : Window
             Grid.SetColumn(ctrl, i % _currentCols);
             System.Windows.Controls.Panel.SetZIndex(ctrl, 0);
             ctrl.Visibility = Visibility.Visible;
+            ResizeControlConsole(ctrl);
         }
     }
 
@@ -331,6 +346,11 @@ public partial class MainWindow : Window
             if (i < _tabButtons.Count)
                 _tabButtons[i].Background = selected ? TabSelectedBrush : TabIdleBrush;
         }
+
+        // The newly visible console kept its old size while hidden — resize it
+        // to fill the container now, without waiting for a click.
+        if (_selectedTabIndex >= 0 && _selectedTabIndex < _sessionControls.Count)
+            ResizeControlConsole(_sessionControls[_selectedTabIndex]);
     }
 
     /// <summary>
@@ -412,24 +432,116 @@ public partial class MainWindow : Window
         await RebuildGridAsync(rows, cols);
     }
 
-    /// <summary>
-    /// Handles preset button clicks (1×1, 2×2, etc.).
-    /// </summary>
-    private async void PresetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button button && button.Tag is string tag)
+        /// <summary>
+        /// Handles preset selection from the dropdown; resets to the placeholder.
+        /// </summary>
+        private async void PresetsCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            var parts = tag.Split(',');
-            if (parts.Length == 2 &&
-                int.TryParse(parts[0], out int rows) &&
-                int.TryParse(parts[1], out int cols))
+            if (PresetsCombo.SelectedIndex <= 0)
+                return; // placeholder (or reset) — nothing to apply
+
+            if (PresetsCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
             {
-                RowsBox.Text = rows.ToString();
-                ColsBox.Text = cols.ToString();
-                await RebuildGridAsync(rows, cols);
+                var parts = tag.Split(',');
+                if (parts.Length == 2 &&
+                    int.TryParse(parts[0], out int rows) &&
+                    int.TryParse(parts[1], out int cols))
+                {
+                    RowsBox.Text = rows.ToString();
+                    ColsBox.Text = cols.ToString();
+                    await RebuildGridAsync(rows, cols);
+                }
             }
+
+            PresetsCombo.SelectedIndex = 0; // back to placeholder for the next pick
         }
-    }
+
+        /// <summary>
+        /// Adds a new session. In tile view, sessions flow left-to-right with up
+        /// to 4 per row — adding one window appends it after the last filled
+        /// cell, so the 5th window sits alone on the second row, the 9th alone
+        /// on the third, etc. In tabs view it appends a new tab.
+        /// </summary>
+        private void NewWindowButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_tabsMode)
+            {
+                int index = _sessionControls.Count;
+                var session = new SessionInfo
+                {
+                    Name = $"Session {index + 1}",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+                };
+                AddSessionControl(session, 0, 0);
+                RefreshViewLayout();
+                SelectTab(index);
+                UpdateSessionCount();
+                UpdateStatusBar($"Added tab {index + 1}");
+                return;
+            }
+
+            int n = _sessionControls.Count + 1;
+            int newCols = Math.Min(4, n);
+            if (_currentCols > newCols) newCols = _currentCols; // keep wider applied layouts
+            int newRows = (int)Math.Ceiling(n / (double)newCols);
+
+            int i = _sessionControls.Count;
+            var newSession = new SessionInfo
+            {
+                Name = $"Session {i / newCols + 1}-{i % newCols + 1}",
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+            AddSessionControl(newSession, i / newCols, i % newCols);
+
+            _currentCols = newCols;
+            _currentRows = newRows;
+            RefreshViewLayout();
+            UpdateSessionCount();
+            UpdateStatusBar($"Grid: {newRows}×{newCols} ({n} sessions)");
+        }
+
+        /// <summary>
+        /// Handles the ✕ on a session: confirm, stop it if running, remove the cell
+        /// and re-flow the grid (a fully empty row disappears).
+        /// </summary>
+        private async void OnSessionCloseRequested(object? sender, EventArgs e)
+        {
+            if (sender is not SessionControl ctrl) return;
+            var session = ctrl.Session;
+
+            var result = MessageBox.Show(
+                session.IsRunning
+                    ? $"\"{session.Name}\" is still running.\nStop it and close this session?"
+                    : $"Close \"{session.Name}\"?",
+                "Close Session",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            if (session.IsRunning)
+                await ctrl.StopSessionAsync();
+
+            session.PropertyChanged -= OnSessionStatusChanged;
+            ctrl.CloseRequested -= OnSessionCloseRequested;
+            _sessionControls.Remove(ctrl);
+            SessionsGrid.Children.Remove(ctrl);
+
+            // Re-flow so the remaining windows share the full width: columns
+            // collapse to the session count (rows follow), so e.g. closing one
+            // of three windows leaves two filling the whole row.
+            _currentCols = Math.Max(1, Math.Min(_currentCols, _sessionControls.Count));
+            _currentRows = Math.Max(1,
+                (int)Math.Ceiling(_sessionControls.Count / (double)Math.Max(1, _currentCols)));
+
+            if (_tabsMode && _selectedTabIndex >= _sessionControls.Count)
+                _selectedTabIndex = Math.Max(0, _sessionControls.Count - 1);
+
+            RefreshViewLayout();
+            UpdateSessionCount();
+            UpdateStatusBar($"Session closed. Grid: {_currentRows}×{_currentCols} ({_sessionControls.Count} sessions)");
+        }
 
     /// <summary>
     /// Handles Enter key in dimension text boxes to apply grid.

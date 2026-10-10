@@ -6,6 +6,7 @@
              xmlns:local="clr-namespace:MultiAI.Controls"
              mc:Ignorable="d"
              d:DesignHeight="400" d:DesignWidth="600"
+             MinHeight="200"
              BorderBrush="#555" BorderThickness="1"
              Background="#1e1e1e"
              SnapsToDevicePixels="True"
@@ -26,6 +27,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" MinWidth="80" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -180,6 +182,22 @@
                         ToolTip="Pop out the console to a separate window"
                         IsEnabled="False"
                         Click="DetachButton_Click" />
+
+                <!-- Close session button (stops the session and removes it from the grid) -->
+                <Button x:Name="CloseSessionButton"
+                        Grid.Column="10"
+                        Content="✕"
+                        Width="24"
+                        Padding="4,2"
+                        Margin="4,0,0,0"
+                        FontSize="12"
+                        FontWeight="Bold"
+                        Foreground="#fff"
+                        Background="#8d2d2d"
+                        BorderBrush="#aa3a3a"
+                        BorderThickness="1"
+                        ToolTip="Close this session (stops it and removes the cell)"
+                        Click="CloseSessionButton_Click" />
             </Grid>
         </Border>
 

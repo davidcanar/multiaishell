@@ -21,6 +21,12 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    /// <summary>
+    /// Raised when the user clicks the session's ✕ button; MainWindow asks for
+    /// confirmation, stops the session if running, and removes the cell.
+    /// </summary>
+    public event EventHandler? CloseRequested;
+
     public SessionInfo Session
     {
         get => _session;
@@ -61,7 +67,23 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
         // Bind the path combo to the shared saved-path list
         PathBox.ItemsSource = PathManager.Entries;
 
+        // Compact mode: hide secondary buttons when the cell gets narrow
+        SizeChanged += SessionControl_SizeChanged;
+
         UpdateUI();
+    }
+
+    /// <summary>
+    /// Cells shrink horizontally to share the row (there is no horizontal
+    /// scrolling), so when a cell gets narrow, hide the convenience buttons
+    /// first and keep Launch / Stop / ✕ usable.
+    /// </summary>
+    private void SessionControl_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        double w = e.NewSize.Width;
+        DetachButton.Visibility = w < 380 ? Visibility.Collapsed : Visibility.Visible;
+        ExplorerButton.Visibility = w < 440 ? Visibility.Collapsed : Visibility.Visible;
+        TerminalButton.Visibility = w < 440 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public SessionControl(SessionInfo session) : this()
@@ -584,6 +606,20 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
         AgentCombo.ContextMenu = menu;
         menu.IsOpen = true;
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Resizes the embedded console to fill this control (used after the control
+    /// becomes visible again — a hidden HwndHost doesn't track layout changes).
+    /// </summary>
+    public void ResizeConsole()
+    {
+        ConsoleHostControl.ResizeConsole();
+    }
+
+    private void CloseSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
