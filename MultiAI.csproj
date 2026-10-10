@@ -8,6 +8,8 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>MultiAI.ico</ApplicationIcon>
+    <Version>0.0.1</Version>
+    <Product>MultiAI Shell</Product>
   </PropertyGroup>
 
   <ItemGroup>
