@@ -21,9 +21,7 @@ internal static class NativeMethods
     public const uint WS_DLGFRAME = 0x00400000;
 
     public const uint WS_EX_TOOLWINDOW = 0x00000080;
-    public const uint WS_EX_NOACTIVATE = 0x08000000;
-
-    // ShowWindow commands
+    public const uint WS_EX_NOACTIVATE = 0x08000000;    // ShowWindow commands
     public const int SW_HIDE = 0;
     public const int SW_SHOWNORMAL = 1;
     public const int SW_SHOWMINIMIZED = 2;
@@ -42,6 +40,7 @@ internal static class NativeMethods
     public const uint DETACHED_PROCESS = 0x00000008;
 
     // Window message
+    public const uint WM_ACTIVATE = 0x0006;
     public const uint WM_SIZE = 0x0005;
     public const uint WM_WINDOWPOSCHANGED = 0x0047;
     public const int WM_GETMINMAXINFO = 0x0024;
@@ -296,5 +295,68 @@ internal static class NativeMethods
         StringBuilder sb = new StringBuilder(len + 1);
         GetWindowText(hWnd, sb, sb.Capacity);
         return sb.ToString();
+    }
+
+    // ——— Toolhelp32: process snapshot ———
+
+    public const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PROCESSENTRY32W
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Process32FirstW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Process32NextW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    /// <summary>
+    /// Returns the PID of the first child process with the given image name
+    /// (e.g. "cmd.exe"), or 0 if none is found.
+    /// </summary>
+    public static int FindChildProcessId(int parentPid, string childImageName)
+    {
+        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == IntPtr.Zero || snap == (IntPtr)(-1)) return 0;
+        try
+        {
+            var entry = new PROCESSENTRY32W { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32W>() };
+            if (!Process32FirstW(snap, ref entry)) return 0;
+            do
+            {
+                if (entry.th32ParentProcessID == (uint)parentPid &&
+                    string.Equals(entry.szExeFile, childImageName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (int)entry.th32ProcessID;
+                }
+            } while (Process32NextW(snap, ref entry));
+            return 0;
+        }
+        finally
+        {
+            CloseHandle(snap);
+        }
     }
 }

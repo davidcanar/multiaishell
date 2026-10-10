@@ -47,17 +47,21 @@ public static class ConsoleWindowManager
         {
             string windowTitle = $"MultiAI_Session_{sessionId}";
 
-            // Set title, cd to directory, then run the selected agent. No outer quotes
-            // around the /k payload: nested quotes would depend on cmd's fragile
-            // first/last-quote stripping. Quoting only the path keeps cmd specials
-            // (& ^ parentheses) in it literal, and '&&' keeps the agent from silently
-            // running in the wrong directory if the cd fails (e.g. UNC path).
-            // Known limitation: cmd expands %VAR% even inside quotes. The agent name
-            // itself is validated (single safe token) before we get here.
+            // Launch through conhost.exe explicitly: this bypasses the "default
+            // terminal application" delegation entirely (Windows 11 otherwise
+            // hands new consoles to Windows Terminal, whose windows cannot be
+            // embedded), and works regardless of the user's terminal setting.
+            //
+            // No outer quotes around the cmd payload: nested quotes would depend
+            // on cmd's fragile first/last-quote stripping. Quoting only the path
+            // keeps cmd specials (& ^ parentheses) in it literal, and '&&' keeps
+            // the agent from silently running in the wrong directory if the cd
+            // fails (e.g. UNC path). Known limitation: cmd expands %VAR% even
+            // inside quotes. The agent name is validated (single safe token).
             var psi = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/k title {windowTitle} & cd /d \"{workingDirectory}\" && {agentName}",
+                FileName = "conhost.exe",
+                Arguments = $"cmd /k title {windowTitle} & cd /d \"{workingDirectory}\" && {agentName}",
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
                 CreateNoWindow = false,
@@ -82,9 +86,14 @@ public static class ConsoleWindowManager
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Find by exact title (set via the 'title' command). The title
-                // contains a fresh GUID, so it can only match our own console.
-                consoleHwnd = NativeMethods.FindWindowByTitle(windowTitle);
+                // Match by title PREFIX: modern Windows cmd appends
+                // " - <running command>" to the console title while a command
+                // executes, so the exact title only exists for milliseconds.
+                // The GUID prefix stays stable from the 'title' command until
+                // the agent's TUI overrides the title — far longer than our
+                // polling interval. The prefix contains a fresh GUID, so it
+                // can only ever match our own console.
+                consoleHwnd = NativeMethods.FindWindowByTitlePrefix(windowTitle);
 
                 if (consoleHwnd == IntPtr.Zero)
                 {
@@ -95,14 +104,23 @@ public static class ConsoleWindowManager
 
             if (consoleHwnd == IntPtr.Zero)
             {
-                result.ErrorMessage = "Console window did not appear within the expected time. " +
-                    "This may happen if Windows Terminal is your default terminal.\n" +
-                    "Please change your default terminal to 'Windows Console Host':\n" +
-                    "Open Windows Terminal → Settings → Default terminal application → 'Windows Console Host'.";
+                // Keep the process: the session will be tracked as an external
+                // ("Running (external)") window by the caller.
+                result.ErrorMessage = "Console window did not appear within the expected time; " +
+                    "the session will keep running in its own window.";
                 return result;
             }
 
             result.ConsoleHandle = consoleHwnd;
+
+            // The tracked process is conhost.exe. Console APIs used later
+            // (AttachConsole for paste and font control) need the PID of a
+            // process attached to the console as a *client*, i.e. the cmd.exe
+            // child that conhost spawned.
+            result.ConsoleClientProcessId = NativeMethods.FindChildProcessId(process.Id, "cmd.exe");
+            if (result.ConsoleClientProcessId == 0)
+                result.ConsoleClientProcessId = process.Id; // fallback: paste may not work, embedding still does
+
             return result;
         }
         catch (OperationCanceledException)
@@ -235,6 +253,14 @@ public class ProcessStartResult
 {
     public Process? Process { get; set; }
     public IntPtr ConsoleHandle { get; set; } = IntPtr.Zero;
+
+    /// <summary>
+    /// PID of a process attached to the console as a client (the cmd.exe child),
+    /// needed by AttachConsole-based paste/font control. The tracked <see cref="Process"/>
+    /// itself is the conhost.exe host.
+    /// </summary>
+    public int ConsoleClientProcessId { get; set; }
+
     public string? ErrorMessage { get; set; }
     public bool Success => ErrorMessage == null && Process != null;
 }

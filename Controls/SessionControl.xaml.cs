@@ -299,6 +299,26 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
 
             if (!result.Success)
             {
+                // The shell started but no console window appeared to embed —
+                // this is what happens when Windows Terminal hosts the console
+                // (its windows can't be hosted via SetParent). Keep the process
+                // running as an external session instead of erroring out and
+                // orphaning the shell.
+                if (result.Process != null && result.ConsoleHandle == IntPtr.Zero)
+                {
+                    _session.Process = result.Process;
+                    _session.ConsoleHandle = IntPtr.Zero;
+                    _session.IsExternal = true;
+                    _session.Status = SessionStatus.Running;
+                    _session.ErrorMessage =
+                        "Opened in a separate window: the console window did not appear in time to be " +
+                        "embedded. Stop this session and relaunch it; if it keeps happening, it may be " +
+                        "a Windows update changing how consoles are hosted.";
+                    UpdateUI();
+                    _ = MonitorProcessAsync(result.Process);
+                    return;
+                }
+
                 _session.Status = SessionStatus.Error;
                 _session.ErrorMessage = result.ErrorMessage ?? "Unknown error";
                 UpdateUI();
@@ -314,8 +334,7 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
             if (result.ConsoleHandle != IntPtr.Zero)
             {
                 ConsoleHostControl.ConsoleHandle = result.ConsoleHandle;
-                if (result.Process != null)
-                    ConsoleHostControl.ProcessId = result.Process.Id;
+                ConsoleHostControl.ProcessId = result.ConsoleClientProcessId;
                 ConsoleHostControl.ResizeConsole();
             }
 

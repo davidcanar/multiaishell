@@ -17,6 +17,7 @@ public class ConsoleHost : HwndHost
     private IntPtr _consoleHandle = IntPtr.Zero;
     private bool _isEmbedded;
     private int _processId; // PID of the console process (cmd.exe)
+    private int _consoleThreadId; // thread owning the console window, for AttachThreadInput
 
     public IntPtr ConsoleHandle
     {
@@ -91,6 +92,13 @@ public class ConsoleHost : HwndHost
 
     // ——— Focus ———
 
+    // The embedded console that was last told it is active. Switching between
+    // embedded consoles moves the real focus but never generates WM_ACTIVATE
+    // (the top-level window is already active), so we deliver those notices
+    // ourselves — conhost only processes keyboard input while it believes it
+    // is the active console.
+    private static IntPtr _lastActivatedConsole = IntPtr.Zero;
+
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
@@ -106,8 +114,25 @@ public class ConsoleHost : HwndHost
     protected override IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int WM_SETFOCUS = 0x0007;
+        const int WM_PARENTNOTIFY = 0x0210;
         if (msg == WM_SETFOCUS)
+        {
             FocusConsole();
+        }
+        else if (msg == WM_PARENTNOTIFY)
+        {
+            // A mouse button was pressed over a child window — the embedded
+            // console. Windows does not move focus to cross-thread children on
+            // its own (and console threads don't answer GetGUIThreadInfo), so
+            // this notification is the parent's chance to focus the console
+            // the user clicked. Replaces the old global mouse hook.
+            int lo = unchecked((short)((long)wParam & 0xFFFF));
+            if (lo is 0x0201 or 0x0202 or 0x0204 or 0x0205 ||   // L/R button down
+                lo is 0x0207 or 0x0208 or 0x020B or 0x020C)     // middle/X button down
+            {
+                FocusConsole();
+            }
+        }
         return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }
 
@@ -222,10 +247,13 @@ public class ConsoleHost : HwndHost
         if (GetGUIThreadInfo(0, ref info) && info.hwndFocus != IntPtr.Zero)
             return FindHostByConsole(info.hwndFocus);
 
-        // The foreground thread reports no focus window: the focus lives on an
-        // embedded console's own (cross-process) thread. Trust that thread's focus
-        // only for a console that actually sits inside the foreground window, so a
-        // stale focus state can't hijack Ctrl+V aimed at another window.
+        // The foreground thread reports no focus window: the focus may sit on an
+        // embedded console. Console window threads are special — GetGUIThreadInfo
+        // does not answer for them — but our thread shares an input queue with
+        // every embedded console (see DoAttach), so GetFocus() reports the shared
+        // focus state directly. Only consoles inside the foreground window count.
+        IntPtr focused = GetFocus();
+        if (focused == IntPtr.Zero) return null;
         foreach (var host in _instances)
         {
             IntPtr console = host._consoleHandle;
@@ -233,17 +261,8 @@ public class ConsoleHost : HwndHost
                 continue;
             if (GetAncestor(console, GA_ROOT) != foreground)
                 continue;
-
-            int threadId = GetWindowThreadProcessId(console, out _);
-            if (threadId == 0) continue;
-
-            var consoleInfo = new GUITHREADINFO { cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>() };
-            if (GetGUIThreadInfo((uint)threadId, ref consoleInfo) &&
-                (consoleInfo.hwndFocus == console ||
-                 (consoleInfo.hwndFocus != IntPtr.Zero && IsChild(console, consoleInfo.hwndFocus))))
-            {
+            if (focused == console || IsChild(console, focused))
                 return host;
-            }
         }
 
         return null;
@@ -526,22 +545,25 @@ public class ConsoleHost : HwndHost
 
         try
         {
-            int foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
-            int consoleThread = GetWindowThreadProcessId(_consoleHandle, out _);
-            int ourThread = GetCurrentThreadId();
+            // SetFocus on the console window is legal because our thread stays
+            // attached to the console thread while embedded (see DoAttach).
+            // SetForegroundWindow on the child brings its root — our main
+            // window — to the foreground and focuses the console itself.
+            SetForegroundWindow(_consoleHandle);
+            SetFocus(_consoleHandle);
 
-            if (foregroundThread != ourThread && foregroundThread != consoleThread)
+            // Deliver the activation notice conhost needs to process input.
+            // WA_ACTIVE = 1 for this console, WA_INACTIVE = 0 for the previous.
+            if (_lastActivatedConsole != IntPtr.Zero &&
+                _lastActivatedConsole != _consoleHandle &&
+                NativeMethods.IsWindow(_lastActivatedConsole))
             {
-                AttachThreadInput(foregroundThread, ourThread, true);
-                SetForegroundWindow(_consoleHandle);
-                SetFocus(_consoleHandle);
-                AttachThreadInput(foregroundThread, ourThread, false);
+                NativeMethods.SendMessage(_lastActivatedConsole, NativeMethods.WM_ACTIVATE,
+                    IntPtr.Zero, IntPtr.Zero);
             }
-            else
-            {
-                SetForegroundWindow(_consoleHandle);
-                SetFocus(_consoleHandle);
-            }
+            NativeMethods.SendMessage(_consoleHandle, NativeMethods.WM_ACTIVATE,
+                (IntPtr)1, IntPtr.Zero);
+            _lastActivatedConsole = _consoleHandle;
         }
         catch { }
     }
@@ -558,6 +580,16 @@ public class ConsoleHost : HwndHost
     {
         if (_consoleHandle == IntPtr.Zero || _isEmbedded) return;
 
+        // Attach our input queue to the console's thread for the whole embedding.
+        // Without this, a click on the (cross-process) console child cannot move
+        // keyboard focus to it — focus changes between unattached threads are
+        // refused — so after switching between two embedded consoles neither
+        // would accept input. While the queues are attached, plain clicks and
+        // SetFocus both work, for every embedded console at once.
+        _consoleThreadId = GetWindowThreadProcessId(_consoleHandle, out _);
+        if (_consoleThreadId != 0 && _consoleThreadId != GetCurrentThreadId())
+            AttachThreadInput(GetCurrentThreadId(), _consoleThreadId, true);
+
         NativeMethods.StyleWindowForEmbedding(_consoleHandle);
         NativeMethods.SetParent(_consoleHandle, hostHwnd);
 
@@ -572,9 +604,6 @@ public class ConsoleHost : HwndHost
         _isEmbedded = true;
 
         ConfigureConsoleFont();
-
-        NativeMethods.SendMessage(_consoleHandle, 0x0006, IntPtr.Zero, IntPtr.Zero);
-        NativeMethods.SendMessage(_consoleHandle, 0x0007, _consoleHandle, IntPtr.Zero);
 
         _instances.Add(this);
         EnsureKeyboardHookInstalled();
@@ -591,6 +620,14 @@ public class ConsoleHost : HwndHost
         _instances.Remove(this);
         StopFontWatchdogIfIdle();
         UninstallKeyboardHookIfIdle();
+
+        // Undo the input-queue attachment before the console leaves our window.
+        if (_consoleThreadId != 0 && _consoleThreadId != GetCurrentThreadId())
+        {
+            try { AttachThreadInput(GetCurrentThreadId(), _consoleThreadId, false); }
+            catch { }
+            _consoleThreadId = 0;
+        }
 
         if (NativeMethods.IsWindow(_consoleHandle))
             ConsoleWindowManager.DetachEmbeddedWindow(_consoleHandle);
@@ -884,6 +921,9 @@ public class ConsoleHost : HwndHost
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetFocus();
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
