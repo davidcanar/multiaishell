@@ -64,20 +64,16 @@
                          LostFocus="SessionNameBox_LostFocus"
                          KeyDown="SessionNameBox_KeyDown" />
 
-                <!-- Path combo (editable with saved paths) -->
+                <!-- Saved-folder combo (select-only; "Add new entry" opens a dialog) -->
                 <ComboBox x:Name="PathBox"
                           Grid.Column="2"
-                          IsEditable="True"
-                          DisplayMemberPath="Path"
                           FontSize="12"
                           Padding="4,2"
                           Margin="4,0,0,0"
                           VerticalAlignment="Center"
                           VerticalContentAlignment="Center"
                           BorderBrush="#555"
-                          ToolTip="Type a path or select a saved one. Enter to save. Right-click to add/remove."
-                          KeyDown="PathBox_KeyDown"
-                          LostFocus="PathBox_LostFocus"
+                          ToolTip="Select a saved folder. Right-click to remove saved folders."
                           SelectionChanged="PathBox_SelectionChanged"
                           MouseRightButtonUp="PathBox_RightClick" />
 
@@ -96,7 +92,7 @@
                         ToolTip="Browse for folder"
                         Click="BrowseButton_Click" />
 
-                <!-- Agent selector -->
+                <!-- Agent selector (select-only; "Add new entry" opens a dialog) -->
                 <ComboBox x:Name="AgentCombo"
                           Grid.Column="4"
                           Width="105"
@@ -104,11 +100,8 @@
                           Margin="4,0,4,0"
                           FontSize="12"
                           BorderBrush="#555"
-                          IsEditable="True"
-                          TextSearch.TextPath=""
-                          ToolTip="Select or type a coding agent name. Right-click to add/remove."
-                          KeyDown="AgentCombo_KeyDown"
-                          LostFocus="AgentCombo_LostFocus"
+                          ToolTip="Select a coding agent. Right-click to remove entries."
+                          SelectionChanged="AgentCombo_SelectionChanged"
                           MouseRightButtonUp="AgentCombo_RightClick" />
 
                 <!-- Launch button -->
