@@ -21,6 +21,17 @@ public partial class MainWindow : Window
     private bool _closePending;
     private bool _closeConfirmed;
 
+    // Tabs view state
+    private bool _tabsMode;
+    private int _selectedTabIndex;
+    private Border? _tabStripPanel;
+    private readonly List<Button> _tabButtons = new();
+
+    private static readonly System.Windows.Media.Brush TabSelectedBrush =
+        new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2d, 0x5d, 0x8d));
+    private static readonly System.Windows.Media.Brush TabIdleBrush =
+        new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2d, 0x2d, 0x2d));
+
     public MainWindow()
     {
         InitializeComponent();
@@ -32,6 +43,9 @@ public partial class MainWindow : Window
         // Wire up the toolbar agent combo to the shared agent list
         ToolbarAgentCombo.ItemsSource = AgentManager.Agents;
         ToolbarAgentCombo.Text = "opencode";
+
+        // Tiles/Tabs switch
+        ViewModeSelector.ViewModeChanged += OnViewModeChanged;
 
         // Try to restore last saved layout, otherwise use default
         if (!TryLoadLayoutOnStartup())
@@ -86,12 +100,6 @@ public partial class MainWindow : Window
         _currentRows = rows;
         _currentCols = cols;
 
-        for (int r = 0; r < rows; r++)
-            SessionsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-        for (int c = 0; c < cols; c++)
-            SessionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
         // Create a SessionControl for each cell
         int total = rows * cols;
         for (int i = 0; i < total; i++)
@@ -108,6 +116,7 @@ public partial class MainWindow : Window
             AddSessionControl(session, row, col);
         }
 
+        RefreshViewLayout();
         UpdateSessionCount();
         UpdateStatusBar($"Grid: {rows}×{cols} ({total} sessions)");
     }
@@ -122,6 +131,9 @@ public partial class MainWindow : Window
             ctrl.Session.PropertyChanged -= OnSessionStatusChanged;
         }
         _sessionControls.Clear();
+
+        _tabStripPanel = null;
+        _tabButtons.Clear();
 
         SessionsGrid.Children.Clear();
         SessionsGrid.RowDefinitions.Clear();
@@ -143,6 +155,201 @@ public partial class MainWindow : Window
         SessionsGrid.Children.Add(control);
     }
 
+    // ——— Tiles / Tabs view switching ———
+    //
+    // SessionControls are never moved between containers or removed from
+    // SessionsGrid: doing that would unload their ConsoleHost (an HwndHost) and
+    // destroy + rebuild the hosted console window, visibly detaching every shell.
+    // Instead both modes only change the grid definitions and per-control
+    // visibility — a Hidden HwndHost simply hides its HWND while the console
+    // process keeps running and buffering output.
+
+    /// <summary>
+    /// Re-applies the layout for the current view mode (tiles grid or tabs).
+    /// </summary>
+    private void RefreshViewLayout()
+    {
+        if (_tabsMode)
+            ApplyTabsLayout();
+        else
+            ApplyTilesLayout();
+    }
+
+    /// <summary>
+    /// Lays the sessions out as a rows×cols grid, all visible.
+    /// </summary>
+    private void ApplyTilesLayout()
+    {
+        RemoveTabStrip();
+
+        SessionsGrid.RowDefinitions.Clear();
+        SessionsGrid.ColumnDefinitions.Clear();
+
+        for (int r = 0; r < _currentRows; r++)
+            SessionsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        for (int c = 0; c < _currentCols; c++)
+            SessionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        for (int i = 0; i < _sessionControls.Count; i++)
+        {
+            var ctrl = _sessionControls[i];
+            Grid.SetRow(ctrl, i / _currentCols);
+            Grid.SetColumn(ctrl, i % _currentCols);
+            System.Windows.Controls.Panel.SetZIndex(ctrl, 0);
+            ctrl.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>
+    /// Lays the sessions out as a single visible shell on the left with a tab
+    /// strip listing every session on the right.
+    /// </summary>
+    private void ApplyTabsLayout()
+    {
+        SessionsGrid.RowDefinitions.Clear();
+        SessionsGrid.ColumnDefinitions.Clear();
+        SessionsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        SessionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        SessionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
+
+        if (_sessionControls.Count == 0)
+        {
+            RemoveTabStrip();
+            return;
+        }
+
+        _selectedTabIndex = Math.Clamp(_selectedTabIndex, 0, _sessionControls.Count - 1);
+
+        // Every control shares the content cell; only the selected one is visible.
+        for (int i = 0; i < _sessionControls.Count; i++)
+        {
+            var ctrl = _sessionControls[i];
+            Grid.SetRow(ctrl, 0);
+            Grid.SetColumn(ctrl, 0);
+        }
+
+        BuildTabStrip();
+    }
+
+    /// <summary>
+    /// Builds the right-hand tab strip (one tab per session, showing its name
+    /// and status) and applies the current tab selection.
+    /// </summary>
+    private void BuildTabStrip()
+    {
+        RemoveTabStrip();
+
+        _tabStripPanel = new Border
+        {
+            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x25, 0x25, 0x25)),
+            BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44)),
+            BorderThickness = new Thickness(1, 0, 0, 0),
+        };
+        Grid.SetRow(_tabStripPanel, 0);
+        Grid.SetColumn(_tabStripPanel, 1);
+
+        var tabsHost = new StackPanel();
+
+        for (int i = 0; i < _sessionControls.Count; i++)
+        {
+            var session = _sessionControls[i].Session;
+            int index = i;
+
+            var dot = new Border { Style = (Style)FindResource("SessionStatusDot") };
+
+            var label = new TextBlock
+            {
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            label.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(SessionInfo.Name)));
+
+            var content = new StackPanel { Orientation = Orientation.Horizontal };
+            content.Children.Add(dot);
+            content.Children.Add(label);
+
+            var tab = new Button
+            {
+                Content = content,
+                DataContext = session,
+                Style = (Style)FindResource("TabStripItemStyle"),
+                ToolTip = session.WorkingDirectory
+            };
+            tab.Click += (_, _) => SelectTab(index);
+
+            _tabButtons.Add(tab);
+            tabsHost.Children.Add(tab);
+        }
+
+        _tabStripPanel.Child = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = tabsHost
+        };
+        SessionsGrid.Children.Add(_tabStripPanel);
+
+        UpdateTabSelection();
+    }
+
+    private void RemoveTabStrip()
+    {
+        if (_tabStripPanel != null)
+            SessionsGrid.Children.Remove(_tabStripPanel);
+        _tabStripPanel = null;
+        _tabButtons.Clear();
+    }
+
+    /// <summary>
+    /// Selects the session at the given index in Tabs view: shows its shell,
+    /// hides the others, highlights the tab.
+    /// </summary>
+    private void SelectTab(int index)
+    {
+        if (!_tabsMode || _sessionControls.Count == 0) return;
+        _selectedTabIndex = Math.Clamp(index, 0, _sessionControls.Count - 1);
+        UpdateTabSelection();
+        UpdateStatusBar($"Tabs: \"{_sessionControls[_selectedTabIndex].Session.Name}\" " +
+                        $"({_selectedTabIndex + 1}/{_sessionControls.Count})");
+    }
+
+    /// <summary>
+    /// Applies the selected tab's state: the selected SessionControl becomes
+    /// visible at full size (like a 1×1 tile), the rest stay hidden but alive.
+    /// </summary>
+    private void UpdateTabSelection()
+    {
+        for (int i = 0; i < _sessionControls.Count; i++)
+        {
+            bool selected = i == _selectedTabIndex;
+            var ctrl = _sessionControls[i];
+
+            System.Windows.Controls.Panel.SetZIndex(ctrl, selected ? 1 : 0);
+            ctrl.Visibility = selected ? Visibility.Visible : Visibility.Hidden;
+
+            if (i < _tabButtons.Count)
+                _tabButtons[i].Background = selected ? TabSelectedBrush : TabIdleBrush;
+        }
+    }
+
+    /// <summary>
+    /// Handles the Tiles/Tabs toggle.
+    /// </summary>
+    private void OnViewModeChanged(bool tabs)
+    {
+        if (_tabsMode == tabs) return;
+        _tabsMode = tabs;
+
+        RefreshViewLayout();
+
+        if (tabs && _sessionControls.Count > 0)
+            UpdateStatusBar($"Tabs: \"{_sessionControls[_selectedTabIndex].Session.Name}\" " +
+                            $"({_selectedTabIndex + 1}/{_sessionControls.Count})");
+        else if (!tabs)
+            UpdateStatusBar($"Grid: {_currentRows}×{_currentCols} ({_sessionControls.Count} sessions)");
+    }
+
     /// <summary>
     /// Clears the grid and rebuilds it from saved layout data.
     /// </summary>
@@ -157,11 +364,6 @@ public partial class MainWindow : Window
         _currentCols = cols;
         RowsBox.Text = rows.ToString();
         ColsBox.Text = cols.ToString();
-
-        for (int r = 0; r < rows; r++)
-            SessionsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        for (int c = 0; c < cols; c++)
-            SessionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         // A hand-edited or stale layout may hold more sessions than the grid has
         // cells for; extra ones would be placed in non-existent rows. Ignore them.
@@ -182,6 +384,7 @@ public partial class MainWindow : Window
             AddSessionControl(session, row, col);
         }
 
+        RefreshViewLayout();
         UpdateSessionCount();
     }
 

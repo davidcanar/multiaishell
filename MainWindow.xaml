@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
          xmlns:local="clr-namespace:MultiAI"
+         xmlns:controls="clr-namespace:MultiAI.Controls"
          xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
          mc:Ignorable="d"
          Title="MultiAI - OpenCode Grid Manager"
@@ -16,7 +17,11 @@
          UseLayoutRounding="True"
          StateChanged="MainWindow_StateChanged">
     <WindowChrome.WindowChrome>
-        <WindowChrome GlassFrameThickness="0"
+        <!-- CaptionHeight=0: the default caption height covers the whole toolbar and
+             swallows clicks on the window buttons (they were only clickable below it).
+             Dragging is handled by Toolbar_MouseLeftButtonDown/DragMove instead. -->
+        <WindowChrome CaptionHeight="0"
+                      GlassFrameThickness="0"
                       UseAeroCaptionButtons="False"
                       ResizeBorderThickness="4" />
     </WindowChrome.WindowChrome>
@@ -79,6 +84,55 @@
             <Setter Property="Height" Value="20" />
             <Setter Property="Margin" Value="6,0" />
             <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Tab strip items (Tabs view, right-hand session list) -->
+        <Style x:Key="TabStripItemStyle" TargetType="Button">
+            <Setter Property="Background" Value="#2d2d2d" />
+            <Setter Property="Foreground" Value="#ccc" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="4,3" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="4">
+                            <ContentPresenter VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.85" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Status dot in a tab strip item; colors follow the session status -->
+        <Style x:Key="SessionStatusDot" TargetType="Border">
+            <Setter Property="Background" Value="#666" />
+            <Setter Property="Width" Value="8" />
+            <Setter Property="Height" Value="8" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="10,0,8,0" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Status}" Value="Running">
+                    <Setter Property="Background" Value="#50C850" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="Starting">
+                    <Setter Property="Background" Value="#C8C850" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="Error">
+                    <Setter Property="Background" Value="#C85050" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <!-- Window chrome buttons (minimize, maximize, close) -->
@@ -199,6 +253,14 @@
 
                 <Separator Style="{StaticResource ToolbarSeparator}" />
 
+                <!-- View mode: Tiles (grid) / Tabs -->
+                <controls:ViewModeToggle x:Name="ViewModeSelector"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,6,0"
+                                         ToolTip="Switch between the tile grid and a tabbed view of the sessions" />
+
+                <Separator Style="{StaticResource ToolbarSeparator}" />
+
                 <!-- Launch All / Stop All -->
                 <ComboBox x:Name="ToolbarAgentCombo"
                           Width="105"
@@ -229,20 +291,24 @@
             </WrapPanel>
 
                 <!-- Window chrome buttons -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button x:Name="MinimizeButton"
                             Content="─"
                             Style="{StaticResource WindowButton}"
+                            Focusable="False"
                             ToolTip="Minimize"
                             Click="MinimizeButton_Click" />
                     <Button x:Name="MaximizeButton"
                             Content="□"
                             Style="{StaticResource WindowButton}"
+                            Focusable="False"
                             ToolTip="Maximize"
                             Click="MaximizeButton_Click" />
                     <Button x:Name="CloseButton"
                             Content="✕"
                             Style="{StaticResource CloseWindowButton}"
+                            Focusable="False"
                             ToolTip="Close"
                             Click="CloseButton_Click" />
                 </StackPanel>
