@@ -4,6 +4,121 @@
              xmlns:local="clr-namespace:MultiAI"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+
+        <!-- Dark popup item: readable text, blue hover highlight -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#e0e0e0" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="#2d2d2d" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2d5d8d" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#777" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Dark combo box: the default WPF chrome is hardcoded light, which
+             made the light-gray combo text unreadable -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="#e0e0e0" />
+            <Setter Property="Background" Value="#3d3d3d" />
+            <Setter Property="BorderBrush" Value="#555" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="2" />
+
+                            <!-- whole box opens the dropdown -->
+                            <ToggleButton Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" />
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <!-- selected item (non-editable mode) -->
+                            <ContentPresenter x:Name="SelectedContent"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"
+                                              IsHitTestVisible="False" />
+
+                            <!-- editable text (Path/Agent combos) -->
+                            <TextBox x:Name="PART_EditableTextBox"
+                                     Visibility="Hidden"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{TemplateBinding Foreground}"
+                                     CaretBrush="#e0e0e0"
+                                     Margin="{TemplateBinding Padding}"
+                                     VerticalAlignment="Center"
+                                     VerticalContentAlignment="Center"
+                                     IsReadOnly="{TemplateBinding IsReadOnly}" />
+
+                            <Path HorizontalAlignment="Right"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0"
+                                  Data="M0,0 L4,4 L8,0 Z"
+                                  Fill="#aaa"
+                                  IsHitTestVisible="False" />
+
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Bottom"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border Background="#2d2d2d"
+                                        BorderBrush="#555"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Margin="0,2,0,0"
+                                        MinWidth="{TemplateBinding ActualWidth}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEditable" Value="True">
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="SelectedContent" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </Application.Resources>
 </Application>
