@@ -196,6 +196,13 @@ public partial class MainWindow : Window
     {
         RemoveTabStrip();
 
+        // Invariant: the grid must have room for every session, even if the
+        // remembered dimensions went stale (e.g. tabs were added while the
+        // tile grid wasn't rebuilt).
+        _currentCols = Math.Max(1, _currentCols);
+        int neededRows = (int)Math.Ceiling(_sessionControls.Count / (double)_currentCols);
+        if (_currentRows < neededRows) _currentRows = neededRows;
+
         SessionsGrid.RowDefinitions.Clear();
         SessionsGrid.ColumnDefinitions.Clear();
 
@@ -466,17 +473,26 @@ public partial class MainWindow : Window
         {
             if (_tabsMode)
             {
-                int index = _sessionControls.Count;
+                // Grow the remembered grid exactly like the tile path does, so
+                // switching back to Tiles shows every session (a 1x2 base grid
+                // with 3 tabs must become 1x3, not drop the third session).
+                int tabCount = _sessionControls.Count + 1;
+                int tabCols = Math.Min(4, tabCount);
+                if (_currentCols > tabCols) tabCols = _currentCols; // keep wider applied layouts
+                _currentCols = tabCols;
+                _currentRows = (int)Math.Ceiling(tabCount / (double)tabCols);
+
+                int index = tabCount - 1;
                 var session = new SessionInfo
                 {
-                    Name = $"Session {index + 1}",
+                    Name = $"Session {tabCount}",
                     WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
                 };
                 AddSessionControl(session, 0, 0);
                 RefreshViewLayout();
                 SelectTab(index);
                 UpdateSessionCount();
-                UpdateStatusBar($"Added tab {index + 1}");
+                UpdateStatusBar($"Added tab {tabCount}");
                 return;
             }
 
