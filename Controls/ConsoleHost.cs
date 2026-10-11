@@ -19,6 +19,13 @@ public class ConsoleHost : HwndHost
     private int _processId; // PID of the console process (cmd.exe)
     private int _consoleThreadId; // thread owning the console window, for AttachThreadInput
 
+    // Serializes every kernel32 FreeConsole/AttachConsole cycle in this process
+    // (paste workers, font watchdog, font configuration) — those calls are
+    // process-global, so an unsynchronized cycle could attach to the wrong
+    // console. Paste runs on a worker thread behind this lock; UI-thread font
+    // work uses Monitor.TryEnter so it never blocks the UI on a long paste.
+    private static readonly object _consoleStateLock = new();
+
     public IntPtr ConsoleHandle
     {
         get => _consoleHandle;
@@ -299,7 +306,9 @@ public class ConsoleHost : HwndHost
             string text = Clipboard.GetText();
             if (string.IsNullOrEmpty(text)) return;
 
-            PasteText(text);
+            // Clipboard access must stay on this (STA UI) thread; everything else
+            // below runs on a worker so a long paste never freezes the window.
+            Task.Run(() => PasteText(text));
         }
         catch { }
     }
@@ -335,10 +344,19 @@ public class ConsoleHost : HwndHost
     /// Every record carries an explicit modifier state, so the Ctrl key still
     /// physically held from Ctrl+V can't combine with the injected characters
     /// (conhost turns Ctrl+Space into NUL under VT input, which ate spaces).
-    /// Must run on the UI thread: AttachConsole/FreeConsole is process-global
-    /// state that the font watchdog also cycles on that thread.
+    /// Runs on a worker thread. AttachConsole/FreeConsole is process-global state
+    /// also cycled by the font watchdog, so every cycle takes _consoleStateLock;
+    /// UI-thread callers use Monitor.TryEnter and skip when a paste holds it.
     /// </summary>
     private bool PasteViaConsoleInput(string text)
+    {
+        lock (_consoleStateLock)
+        {
+            return PasteViaConsoleInputCore(text);
+        }
+    }
+
+    private bool PasteViaConsoleInputCore(string text)
     {
         try
         {
@@ -359,24 +377,38 @@ public class ConsoleHost : HwndHost
                     if (records.Length == 0)
                         return true; // nothing printable to paste
 
-                    // Bounded chunks so a single call never marshals a huge buffer.
-                    const int chunkSize = 2048;
-                    bool anyWritten = false;
-                    for (int offset = 0; offset < records.Length; offset += chunkSize)
+                    // Pin the array and hand WriteConsoleInput a raw pointer: the
+                    // default marshaler copies struct-by-struct, which for long
+                    // pastes costs more than everything else combined. The struct
+                    // is blittable, so conhost reads the managed memory directly.
+                    var pin = GCHandle.Alloc(records, GCHandleType.Pinned);
+                    try
                     {
-                        int count = Math.Min(chunkSize, records.Length - offset);
-                        var chunk = new INPUT_RECORD[count];
-                        Array.Copy(records, offset, chunk, 0, count);
-
-                        if (!WriteConsoleInput(hIn, chunk, (uint)count, out uint written) || written == 0)
+                        // Large but bounded chunks; with the pointer overload a
+                        // chunk is just a memcpy on conhost's side.
+                        const int chunkSize = 16384;
+                        bool anyWritten = false;
+                        for (int offset = 0; offset < records.Length;)
                         {
-                            // Once anything was written, report success anyway so the
-                            // fallback doesn't paste the whole text a second time.
-                            return anyWritten;
+                            int count = Math.Min(chunkSize, records.Length - offset);
+                            IntPtr chunkPtr = Marshal.UnsafeAddrOfPinnedArrayElement(records, offset);
+
+                            if (!WriteConsoleInput(hIn, chunkPtr, (uint)count, out uint written) ||
+                                written == 0 || written > (uint)count)
+                            {
+                                // Once anything was written, report success anyway so the
+                                // fallback doesn't paste the whole text a second time.
+                                return anyWritten;
+                            }
+                            anyWritten = true;
+                            offset += (int)written; // honor partial writes
                         }
-                        anyWritten = true;
+                        return true;
                     }
-                    return true;
+                    finally
+                    {
+                        if (pin.IsAllocated) pin.Free();
+                    }
                 }
                 finally
                 {
@@ -417,7 +449,7 @@ public class ConsoleHost : HwndHost
             // '\n' keeps VK 0 so cooked-mode readers don't treat it as Enter.
             if (ch != '\n')
             {
-                short scan = VkKeyScanW(ch);
+                short scan = GetVkScanCached(ch);
                 if (scan != -1)
                 {
                     int modifiers = (scan >> 8) & 0xFF;
@@ -435,6 +467,37 @@ public class ConsoleHost : HwndHost
         }
 
         return records.ToArray();
+    }
+
+    // VkKeyScanW is one P/Invoke per call; without a cache a long paste pays it
+    // once per character. Keyed by the keyboard layout so switching layouts
+    // invalidates the cache naturally (HKLs are distinct per layout).
+    private static readonly object _vkCacheLock = new();
+    private static IntPtr _vkCacheLayout = IntPtr.Zero;
+    private static readonly Dictionary<char, short> _vkScanCache = new();
+
+    private static short GetVkScanCached(char ch)
+    {
+        IntPtr layout = GetKeyboardLayout(0);
+        lock (_vkCacheLock)
+        {
+            if (_vkCacheLayout != layout)
+            {
+                _vkCacheLayout = layout;
+                _vkScanCache.Clear();
+            }
+            if (_vkScanCache.TryGetValue(ch, out short cached))
+                return cached;
+        }
+
+        short scan = VkKeyScanW(ch);
+
+        lock (_vkCacheLock)
+        {
+            _vkCacheLayout = layout;
+            _vkScanCache[ch] = scan;
+        }
+        return scan;
     }
 
     private static INPUT_RECORD MakeKeyRecord(bool keyDown, ushort vk, char ch, uint controlState)
@@ -477,14 +540,19 @@ public class ConsoleHost : HwndHost
 
             // '\n' is posted like any other char: conhost passes the bare LF through,
             // which agent TUIs treat as newline-without-submit. Posted messages keep
-            // their order; pace in small batches so conhost's message queue is never
-            // flooded (PostMessage silently drops once the queue fills).
-            int posted = 0;
+            // their order. No fixed pacing — instead, retry when PostMessage fails
+            // (the console message queue is full) so fast pastes never sleep and
+            // flooded queues never silently drop characters.
             foreach (char c in text)
             {
-                PostMessage(_consoleHandle, WM_CHAR, (IntPtr)(ushort)c, IntPtr.Zero);
-                if (++posted % 500 == 0)
-                    System.Threading.Thread.Sleep(50);
+                for (int retry = 0; ; retry++)
+                {
+                    if (PostMessage(_consoleHandle, WM_CHAR, (IntPtr)(ushort)c, IntPtr.Zero) != IntPtr.Zero)
+                        break;
+                    if (retry >= 200 || !NativeMethods.IsWindow(_consoleHandle))
+                        return; // queue permanently full or window gone
+                    System.Threading.Thread.Sleep(5);
+                }
             }
         });
     }
@@ -651,6 +719,21 @@ public class ConsoleHost : HwndHost
     {
         if (_processId <= 0) return;
 
+        // Runs on the UI thread (from DoAttach). Never block on a paste in
+        // flight: skipping is safe because the font watchdog re-asserts shortly.
+        if (!Monitor.TryEnter(_consoleStateLock, 50)) return;
+        try
+        {
+            ConfigureConsoleFontCore();
+        }
+        finally
+        {
+            Monitor.Exit(_consoleStateLock);
+        }
+    }
+
+    private void ConfigureConsoleFontCore()
+    {
         FreeConsole();
         if (AttachConsole(_processId))
         {
@@ -737,6 +820,21 @@ public class ConsoleHost : HwndHost
     /// font is still correct: one attach + one font query.
     /// </summary>
     private void EnforceConsoleFont()
+    {
+        // Runs on the UI thread (font watchdog tick). Skip rather than block
+        // while a paste holds the console-state lock; the next tick re-checks.
+        if (!Monitor.TryEnter(_consoleStateLock, 50)) return;
+        try
+        {
+            EnforceConsoleFontCore();
+        }
+        finally
+        {
+            Monitor.Exit(_consoleStateLock);
+        }
+    }
+
+    private void EnforceConsoleFontCore()
     {
         try
         {
@@ -877,6 +975,9 @@ public class ConsoleHost : HwndHost
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern short VkKeyScanW(char ch);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetKeyboardLayout(uint idThread);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AttachConsole(int dwProcessId);
@@ -887,7 +988,7 @@ public class ConsoleHost : HwndHost
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WriteConsoleInput(IntPtr hConsoleInput, INPUT_RECORD[] lpBuffer, uint nLength, out uint lpNumberOfEventsWritten);
+    private static extern bool WriteConsoleInput(IntPtr hConsoleInput, IntPtr lpBuffer, uint nLength, out uint lpNumberOfEventsWritten);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
