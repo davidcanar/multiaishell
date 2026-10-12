@@ -1,9 +1,11 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using MultiAI.Helpers;
 
 namespace MultiAI.Controls;
@@ -295,30 +297,196 @@ public class ConsoleHost : HwndHost
     // ——— Paste via WriteConsoleInput ———
 
     /// <summary>
-    /// Pastes clipboard text into the console's input buffer using WriteConsoleInput.
+    /// Pastes the clipboard into the console's input buffer using WriteConsoleInput.
     /// This is the correct way to inject input into any console application.
+    /// Text is injected as key records; an image is staged as a PNG file and its
+    /// path is injected as a bracketed paste (see PasteImageFromClipboard).
     /// </summary>
     public void PasteFromClipboard()
     {
         try
         {
-            if (!Clipboard.ContainsText()) return;
-            string text = Clipboard.GetText();
-            if (string.IsNullOrEmpty(text)) return;
+            if (Clipboard.ContainsText())
+            {
+                string text = Clipboard.GetText();
+                if (string.IsNullOrEmpty(text)) return;
 
-            // Clipboard access must stay on this (STA UI) thread; everything else
-            // below runs on a worker so a long paste never freezes the window.
-            Task.Run(() => PasteText(text));
+                // Clipboard access must stay on this (STA UI) thread; everything else
+                // below runs on a worker so a long paste never freezes the window.
+                Task.Run(() => PasteText(text));
+                return;
+            }
+
+            PasteImageFromClipboard();
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Image paste. opencode's TUI attaches a clipboard image when it receives a
+    /// paste whose text is a path to an image file (resolvePastedAttachments), the
+    /// same way it does for a drag-and-dropped file. So stage the clipboard bitmap
+    /// as a PNG under %TEMP%\MultiAI and paste the path wrapped in the bracketed
+    /// paste markers a terminal sends around a real paste (ESC[200~ ... ESC[201~);
+    /// opencode then turns it into an [Image #N] attachment. Any other agent still
+    /// sees the path as plain text. Text keeps priority: an image is only pasted
+    /// when the clipboard holds no text at all (screenshots, copied pictures).
+    /// </summary>
+    private void PasteImageFromClipboard()
+    {
+        // Clipboard reads must stay on the UI (STA) thread; the PNG encode, disk
+        // write, and injection run on the paste worker like any other paste.
+        byte[]? pngBytes = TryReadPngStreamFromClipboard();
+        ClipboardPixels? pixels = pngBytes == null ? TryReadClipboardPixels() : null;
+        if (pngBytes == null && pixels == null) return;
+
+        Task.Run(() =>
+        {
+            string? path = WriteStagedImage(pngBytes, pixels);
+            if (path == null) return;
+            PasteText(BracketedPaste(path), allowEscape: true);
+        });
+    }
+
+    private static string BracketedPaste(string text) => "\x1b[200~" + text + "\x1b[201~";
+
+    // ——— Clipboard image staging ———
+
+    private sealed record ClipboardPixels(
+        int Width, int Height, double DpiX, double DpiY, PixelFormat Format, byte[] Pixels, int Stride);
+
+    /// <summary>
+    /// Reads a verbatim PNG stream off the clipboard when one is present (the
+    /// Snipping Tool and browsers put a "PNG" format there). Verified against the
+    /// PNG signature so a mislabeled stream can never be written as a .png file.
+    /// Runs on the UI (STA) thread.
+    /// </summary>
+    private static byte[]? TryReadPngStreamFromClipboard()
+    {
+        try
+        {
+            var data = Clipboard.GetDataObject();
+            if (data == null) return null;
+
+            foreach (string format in new[] { "PNG", "image/png" })
+            {
+                if (!data.GetDataPresent(format)) continue;
+                if (data.GetData(format) is not MemoryStream stream) continue;
+
+                byte[] bytes = stream.ToArray();
+                // PNG signature: 0x89 'P' 'N' 'G' \r \n \x1a \n
+                if (bytes.Length > 8 &&
+                    bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
+                    bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A)
+                {
+                    return bytes;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Copies the clipboard bitmap into raw pixels on the UI (STA) thread, in a
+    /// form that can be re-created on a worker thread without touching WPF's
+    /// thread-affine BitmapSource. Runs on the UI (STA) thread.
+    /// </summary>
+    private static ClipboardPixels? TryReadClipboardPixels()
+    {
+        try
+        {
+            if (!Clipboard.ContainsImage()) return null;
+            var source = Clipboard.GetImage();
+            if (source == null || source.PixelWidth == 0 || source.PixelHeight == 0) return null;
+
+            // Palettized or 16-bit sources: normalize to Bgra32 so CopyPixels
+            // yields plain 8-bit-per-channel pixels with no palette to carry over.
+            if (source.Format != PixelFormats.Bgra32 && source.Format != PixelFormats.Bgr32)
+            {
+                var converted = new FormatConvertedBitmap();
+                converted.BeginInit();
+                converted.Source = source;
+                converted.DestinationFormat = PixelFormats.Bgra32;
+                converted.EndInit();
+                source = converted;
+            }
+
+            int stride = (source.PixelWidth * source.Format.BitsPerPixel + 7) / 8;
+            var pixels = new byte[stride * (long)source.PixelHeight];
+            source.CopyPixels(pixels, stride, 0);
+            return new ClipboardPixels(source.PixelWidth, source.PixelHeight,
+                source.DpiX, source.DpiY, source.Format, pixels, stride);
+        }
+        catch { return null; }
+    }
+
+    private static readonly string StagedImageDir =
+        Path.Combine(Path.GetTempPath(), "MultiAI");
+
+    /// <summary>
+    /// Writes the staged image to disk and returns its path. A clipboard PNG
+    /// stream is written byte-for-byte; raw pixels are re-encoded as PNG on the
+    /// worker thread. Also prunes staged files older than a day. Runs on a worker.
+    /// </summary>
+    private static string? WriteStagedImage(byte[]? pngBytes, ClipboardPixels? pixels)
+    {
+        try
+        {
+            if (pngBytes == null && pixels == null) return null;
+            Directory.CreateDirectory(StagedImageDir);
+            CleanupStaleStagedImages();
+
+            string file = Path.Combine(StagedImageDir, "paste-"
+                + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")
+                + "-" + Guid.NewGuid().ToString("N")[..6] + ".png");
+
+            if (pngBytes != null)
+            {
+                File.WriteAllBytes(file, pngBytes);
+                return file;
+            }
+
+            double dpiX = pixels!.DpiX > 0 ? pixels.DpiX : 96;
+            double dpiY = pixels.DpiY > 0 ? pixels.DpiY : 96;
+            var source = BitmapSource.Create(pixels.Width, pixels.Height, dpiX, dpiY,
+                pixels.Format, null, pixels.Pixels, pixels.Stride);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(source));
+            using (var stream = File.Create(file))
+                encoder.Save(stream);
+            return file;
+        }
+        catch { return null; }
+    }
+
+    private static void CleanupStaleStagedImages()
+    {
+        try
+        {
+            DateTime cutoff = DateTime.Now - TimeSpan.FromHours(24);
+            foreach (string file in Directory.EnumerateFiles(StagedImageDir, "paste-*.png"))
+            {
+                try
+                {
+                    if (File.GetLastWriteTime(file) < cutoff)
+                        File.Delete(file);
+                }
+                catch { /* file locked or gone — leave it */ }
+            }
+        }
+        catch { /* best effort */ }
     }
 
     /// <summary>
     /// Injects text into the console. The primary path writes key records straight
     /// into the console's input buffer (WriteConsoleInput); the fallback posts
     /// WM_CHAR messages to the console window.
+    /// <paramref name="allowEscape"/> lets ESC characters through (used for image
+    /// pastes, which carry their own bracketed-paste markers); without it control
+    /// characters are stripped as for any plain text paste.
     /// </summary>
-    public void PasteText(string text)
+    public void PasteText(string text, bool allowEscape = false)
     {
         if (string.IsNullOrEmpty(text)) return;
 
@@ -328,7 +496,7 @@ public class ConsoleHost : HwndHost
         text = text.Replace("\r\n", "\n").Replace('\r', '\n');
 
         // Method 1: WriteConsoleInput (injects directly into console input buffer)
-        if (_processId > 0 && PasteViaConsoleInput(text))
+        if (_processId > 0 && PasteViaConsoleInput(text, allowEscape))
             return;
 
         // Method 2: Fallback - send WM_CHAR messages to the console window
@@ -348,15 +516,15 @@ public class ConsoleHost : HwndHost
     /// also cycled by the font watchdog, so every cycle takes _consoleStateLock;
     /// UI-thread callers use Monitor.TryEnter and skip when a paste holds it.
     /// </summary>
-    private bool PasteViaConsoleInput(string text)
+    private bool PasteViaConsoleInput(string text, bool allowEscape = false)
     {
         lock (_consoleStateLock)
         {
-            return PasteViaConsoleInputCore(text);
+            return PasteViaConsoleInputCore(text, allowEscape);
         }
     }
 
-    private bool PasteViaConsoleInputCore(string text)
+    private bool PasteViaConsoleInputCore(string text, bool allowEscape)
     {
         try
         {
@@ -373,7 +541,7 @@ public class ConsoleHost : HwndHost
 
                 try
                 {
-                    var records = BuildKeyRecords(text);
+                    var records = BuildKeyRecords(text, allowEscape);
                     if (records.Length == 0)
                         return true; // nothing printable to paste
 
@@ -432,15 +600,19 @@ public class ConsoleHost : HwndHost
     /// SHIFT flag) is reported when the character maps to a plain or shifted key
     /// on the current layout; characters that would need Ctrl/Alt (AltGr) are sent
     /// as bare character records so no control-key state is ever implied.
+    /// Control characters are stripped, except newline and tab — and ESC when
+    /// <paramref name="allowEscape"/> is set, for pastes that carry their own
+    /// bracketed-paste markers (image pastes).
     /// </summary>
-    private static INPUT_RECORD[] BuildKeyRecords(string text)
+    private static INPUT_RECORD[] BuildKeyRecords(string text, bool allowEscape = false)
     {
         var records = new List<INPUT_RECORD>(text.Length * 2);
 
         foreach (char ch in text)
         {
-            // Strip control characters except newline and tab; they only confuse TUIs.
-            if ((ch < 0x20 && ch != '\n' && ch != '\t') || ch == (char)0x7F)
+            // Strip control characters except newline and tab (and ESC when the
+            // paste brings its own markers); they only confuse TUIs.
+            if ((ch < 0x20 && ch != '\n' && ch != '\t' && !(allowEscape && ch == '\x1B')) || ch == (char)0x7F)
                 continue;
 
             ushort vk = 0;
