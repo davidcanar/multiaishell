@@ -26,7 +26,8 @@ public static class LayoutManager
     /// <summary>
     /// Saves the current grid layout to disk.
     /// </summary>
-    public static void SaveLayout(int rows, int cols, IReadOnlyList<SessionInfo> sessions)
+    public static void SaveLayout(int rows, int cols, IReadOnlyList<SessionInfo> sessions,
+        bool tabsMode = false, int selectedTabIndex = 0)
     {
         try
         {
@@ -34,6 +35,8 @@ public static class LayoutManager
             {
                 Rows = rows,
                 Columns = cols,
+                ViewMode = tabsMode ? "tabs" : "tiles",
+                SelectedTabIndex = selectedTabIndex,
                 Sessions = sessions.Select(s => new SessionConfig
                 {
                     Name = s.Name,
@@ -96,6 +99,15 @@ public class LayoutData
 
     [JsonPropertyName("columns")]
     public int Columns { get; set; } = 3;
+
+    // "tabs" or "tiles" — which top-bar mode was active at save time.
+    // Missing (older layout.json) falls back to tiles, the old behavior.
+    [JsonPropertyName("viewMode")]
+    public string ViewMode { get; set; } = "tiles";
+
+    // Which tab was selected (only meaningful when ViewMode is "tabs").
+    [JsonPropertyName("selectedTab")]
+    public int SelectedTabIndex { get; set; } = 0;
 
     [JsonPropertyName("sessions")]
     public List<SessionConfig> Sessions { get; set; } = new();

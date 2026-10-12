@@ -830,7 +830,8 @@ public partial class MainWindow : Window
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         var sessions = _sessionControls.Select(c => c.Session).ToList();
-        LayoutManager.SaveLayout(_currentRows, _currentCols, sessions);
+        LayoutManager.SaveLayout(_currentRows, _currentCols, sessions,
+            _tabsMode, _selectedTabIndex);
         UpdateStatusBar($"Layout saved ({_currentRows}×{_currentCols}, {sessions.Count} sessions).");
     }
 
@@ -1009,11 +1010,13 @@ public partial class MainWindow : Window
             return;
 
         var sessions = _sessionControls.Select(c => c.Session).ToList();
-        LayoutManager.SaveLayout(_currentRows, _currentCols, sessions);
+        LayoutManager.SaveLayout(_currentRows, _currentCols, sessions,
+            _tabsMode, _selectedTabIndex);
     }
 
     /// <summary>
-    /// Tries to restore the last saved layout on startup.
+    /// Tries to restore the last saved layout on startup, including which view
+    /// mode (Tiles/Tabs) and tab selection were active at save time.
     /// </summary>
     private bool TryLoadLayoutOnStartup()
     {
@@ -1026,8 +1029,16 @@ public partial class MainWindow : Window
             if (data == null || data.Sessions.Count == 0)
                 return false;
 
+            // Set the view state BEFORE ApplyLayout — RefreshViewLayout branches
+            // on _tabsMode. Initialize updates the toggle visuals without raising
+            // ViewModeChanged, so the handler doesn't re-apply the layout.
+            _tabsMode = string.Equals(data.ViewMode, "tabs", StringComparison.OrdinalIgnoreCase);
+            _selectedTabIndex = data.SelectedTabIndex;
+            ViewModeSelector.Initialize(_tabsMode);
+
             ApplyLayout(data);
-            UpdateStatusBar($"Restored layout: {data.Rows}×{data.Columns} ({data.Sessions.Count} sessions).");
+            UpdateStatusBar($"Restored layout: {data.Rows}×{data.Columns} " +
+                            $"({data.Sessions.Count} sessions, {(_tabsMode ? "Tabs" : "Tiles")}).");
             return true;
         }
         catch

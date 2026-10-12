@@ -44,11 +44,29 @@ public partial class ViewModeToggle : UserControl
         SetMode(true, animate: true);
     }
 
+    /// <summary>
+    /// Restores the mode at startup (layout load) without animating or raising
+    /// ViewModeChanged — MainWindow applies the restored layout itself.
+    /// </summary>
+    public void Initialize(bool tabs)
+    {
+        if (_isTabs == tabs) return; // startup default is tiles; nothing to move
+        _isTabs = tabs;
+        ApplyVisuals(tabs, animate: false);
+    }
+
     private void SetMode(bool tabs, bool animate)
     {
         if (_isTabs == tabs) return;
         _isTabs = tabs;
 
+        ApplyVisuals(tabs, animate);
+
+        ViewModeChanged?.Invoke(tabs);
+    }
+
+    private void ApplyVisuals(bool tabs, bool animate)
+    {
         var slide = new DoubleAnimation(tabs ? ThumbSlideDistance : 0,
             TimeSpan.FromMilliseconds(animate ? 160 : 0))
         {
@@ -59,7 +77,5 @@ public partial class ViewModeToggle : UserControl
         // Dark text on the teal thumb, gray text on the unselected side.
         TilesLabel.Foreground = tabs ? UnselectedTextBrush : SelectedTextBrush;
         TabsLabel.Foreground = tabs ? SelectedTextBrush : UnselectedTextBrush;
-
-        ViewModeChanged?.Invoke(tabs);
     }
 }
