@@ -27,6 +27,10 @@ public partial class MainWindow : Window
     private Border? _tabStripPanel;
     private readonly List<Button> _tabButtons = new();
 
+    // Header agent combo state
+    private string _toolbarAgent = "opencode";
+    private ComboBoxItem? _addToolbarAgentItem;
+
     private static readonly System.Windows.Media.Brush TabSelectedBrush =
         new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2d, 0x5d, 0x8d));
     private static readonly System.Windows.Media.Brush TabIdleBrush =
@@ -41,8 +45,11 @@ public partial class MainWindow : Window
         ColsBox.KeyDown += DimensionBox_KeyDown;
 
         // Wire up the toolbar agent combo to the shared agent list
-        ToolbarAgentCombo.ItemsSource = AgentManager.Agents;
-        ToolbarAgentCombo.Text = "opencode";
+        InitToolbarAgentCombo();
+
+        // Sync sessions when saved-folder entries or agents are edited globally
+        PathManager.EntryEdited += OnPathEntryEdited;
+        AgentManager.AgentRenamed += OnAgentRenamed;
 
         // Tiles/Tabs switch
         ViewModeSelector.ViewModeChanged += OnViewModeChanged;
@@ -79,6 +86,162 @@ public partial class MainWindow : Window
             handled = true;
         }
         return IntPtr.Zero;
+    }
+
+    // ——— Header agent combo ———
+
+    private static TextBlock MakeAddEntryText() => new TextBlock
+    {
+        Text = "➕ Add new entry",
+        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4e, 0xc9, 0xb0))
+    };
+
+    private void InitToolbarAgentCombo()
+    {
+        _addToolbarAgentItem = new ComboBoxItem { Content = MakeAddEntryText() };
+        var items = new System.Windows.Data.CompositeCollection();
+        items.Add(_addToolbarAgentItem);
+        items.Add(new System.Windows.Data.CollectionContainer { Collection = AgentManager.Agents });
+        ToolbarAgentCombo.ItemsSource = items;
+
+        ToolbarAgentCombo.SelectedItem = AgentManager.Agents.Contains(_toolbarAgent)
+            ? _toolbarAgent
+            : null;
+    }
+
+    /// <summary>
+    /// "Add new entry" opens the agent dialog; picking an agent sets the one
+    /// used by Launch All.
+    /// </summary>
+    private void ToolbarAgentCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.AddedItems.Count == 0) return;
+
+        if (e.AddedItems[0] is ComboBoxItem item && ReferenceEquals(item, _addToolbarAgentItem))
+        {
+            var name = AddEntryDialogs.PromptForAgent(Window.GetWindow(this));
+            if (name != null)
+            {
+                AgentManager.AddAgent(name); // no-op when it already exists
+                _toolbarAgent = name;
+                ToolbarAgentCombo.SelectedItem = AgentManager.Agents.FirstOrDefault(
+                    a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
+            }
+            else
+            {
+                ToolbarAgentCombo.SelectedItem = AgentManager.Agents.Contains(_toolbarAgent)
+                    ? _toolbarAgent
+                    : null;
+            }
+            return;
+        }
+
+        if (e.AddedItems[0] is string agent)
+        {
+            _toolbarAgent = agent;
+        }
+    }
+
+    /// <summary>
+    /// Right-click lists agents; each has Edit and Delete sub-options. Edits
+    /// propagate to every session (and this combo) via AgentRenamed.
+    /// </summary>
+    private void ToolbarAgentCombo_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        var menu = new ContextMenu();
+        menu.Foreground = System.Windows.Media.Brushes.White;
+        menu.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 45));
+
+        foreach (var agent in AgentManager.Agents)
+        {
+            var item = new MenuItem { Header = agent };
+
+            var editItem = new MenuItem { Header = "✏  Edit…" };
+            editItem.Click += (_, __) =>
+            {
+                var name = AddEntryDialogs.PromptForAgent(Window.GetWindow(this), agent, editMode: true);
+                if (name != null && !name.Equals(agent, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!AgentManager.RenameAgent(agent, name))
+                    {
+                        MessageBox.Show(this, $"An agent named \"{name}\" already exists.", "Edit agent",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
+            };
+
+            var deleteItem = new MenuItem { Header = "🗑  Delete" };
+            deleteItem.Click += (_, __) =>
+            {
+                AgentManager.RemoveAgent(agent);
+                // sessions using the removed agent fall back to opencode
+                foreach (var ctrl in _sessionControls)
+                {
+                    if (string.Equals(ctrl.Session.AgentName, agent, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ctrl.Session.AgentName = "opencode";
+                        ctrl.RefreshAgentSelection();
+                    }
+                }
+                if (string.Equals(_toolbarAgent, agent, StringComparison.OrdinalIgnoreCase))
+                {
+                    _toolbarAgent = "opencode";
+                    ToolbarAgentCombo.SelectedItem = AgentManager.Agents.Contains("opencode") ? "opencode" : null;
+                }
+            };
+
+            item.Items.Add(editItem);
+            item.Items.Add(deleteItem);
+            menu.Items.Add(item);
+        }
+
+        ToolbarAgentCombo.ContextMenu = menu;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// A saved folder was edited: update every session that uses it (directory,
+    /// label and dropdown selection).
+    /// </summary>
+    private void OnPathEntryEdited(SavedPathEntry oldEntry, SavedPathEntry newEntry)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            foreach (var ctrl in _sessionControls)
+            {
+                if (string.Equals(ctrl.Session.WorkingDirectory, oldEntry.Path, StringComparison.OrdinalIgnoreCase))
+                {
+                    ctrl.Session.WorkingDirectory = newEntry.Path;
+                    ctrl.Session.Name = newEntry.Name;
+                    ctrl.SetSessionNameDisplay(newEntry.Name);
+                    ctrl.RefreshPathSelection();
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// An agent was renamed: update every session (and this combo) that used it.
+    /// </summary>
+    private void OnAgentRenamed(string oldName, string newName)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            foreach (var ctrl in _sessionControls)
+            {
+                if (string.Equals(ctrl.Session.AgentName, oldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ctrl.Session.AgentName = newName;
+                    ctrl.RefreshAgentSelection();
+                }
+            }
+            if (string.Equals(_toolbarAgent, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                _toolbarAgent = newName;
+                ToolbarAgentCombo.SelectedItem = AgentManager.Agents.Contains(newName) ? newName : null;
+            }
+        });
     }
 
     /// <summary>
@@ -576,8 +739,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async void LaunchAllButton_Click(object sender, RoutedEventArgs e)
     {
-        string agent = ToolbarAgentCombo.Text.Trim();
-        if (string.IsNullOrWhiteSpace(agent)) agent = "opencode";
+        string agent = string.IsNullOrWhiteSpace(_toolbarAgent) ? "opencode" : _toolbarAgent;
 
         int launched = 0;
         var tasks = new List<Task>();

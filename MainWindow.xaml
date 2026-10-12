@@ -284,8 +284,9 @@
                           Foreground="#e0e0e0"
                           Background="#3d3d3d"
                           BorderBrush="#555"
-                          IsEditable="True"
-                          ToolTip="Agent to use when launching all sessions" />
+                          ToolTip="Agent to use when launching all sessions. Right-click to edit or remove entries."
+                          SelectionChanged="ToolbarAgentCombo_SelectionChanged"
+                          MouseRightButtonUp="ToolbarAgentCombo_RightClick" />
 
                 <Button x:Name="LaunchAllButton"
                         Content="▶ Launch All"

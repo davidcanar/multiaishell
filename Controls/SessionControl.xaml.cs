@@ -19,11 +19,9 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     private SessionInfo _session;
     private CancellationTokenSource? _cts;
 
-    // The "Add new entry" items and the last real selections (to restore on cancel)
+    // The "Add new entry" item and the last real selection (to restore on cancel)
     private ComboBoxItem? _addPathItem;
-    private ComboBoxItem? _addAgentItem;
     private SavedPathEntry? _lastPathEntry;
-    private string? _lastAgent;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -113,8 +111,9 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     }
 
     /// <summary>
-    /// Populates both dropdowns: an "Add new entry" item at the top, then the
-    /// shared entries (kept live via the observable collections).
+    /// Populates the dropdowns. The folder dropdown starts with an "Add new
+    /// entry" item followed by the saved label+folder pairs (kept live via the
+    /// observable collection); the agent dropdown shows the shared agent list.
     /// </summary>
     private void InitComboItems()
     {
@@ -124,11 +123,7 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
         pathItems.Add(new System.Windows.Data.CollectionContainer { Collection = PathManager.Entries });
         PathBox.ItemsSource = pathItems;
 
-        _addAgentItem = new ComboBoxItem { Content = MakeAddEntryText() };
-        var agentItems = new System.Windows.Data.CompositeCollection();
-        agentItems.Add(_addAgentItem);
-        agentItems.Add(new System.Windows.Data.CollectionContainer { Collection = AgentManager.Agents });
-        AgentCombo.ItemsSource = agentItems;
+        AgentCombo.ItemsSource = AgentManager.Agents;
     }
 
     private static TextBlock MakeAddEntryText() => new TextBlock
@@ -160,9 +155,25 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     {
         var match = AgentManager.Agents.FirstOrDefault(a =>
             string.Equals(a, agentName, StringComparison.OrdinalIgnoreCase));
-        _lastAgent = match;
         AgentCombo.SelectedItem = match;
     }
+
+    /// <summary>
+    /// Re-applies the session's saved folder selection (after an entry was
+    /// edited elsewhere).
+    /// </summary>
+    public void RefreshPathSelection() => SelectPathFor(_session.WorkingDirectory);
+
+    /// <summary>
+    /// Re-applies the session's agent selection (after an agent was renamed or
+    /// removed elsewhere).
+    /// </summary>
+    public void RefreshAgentSelection() => SelectAgent(_session.AgentName);
+
+    /// <summary>
+    /// Updates the read-only label display.
+    /// </summary>
+    public void SetSessionNameDisplay(string name) => SessionNameBox.Text = name;
 
     /// <summary>
     /// Updates the UI elements to reflect the current session state.
@@ -189,26 +200,6 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
 
         // Enable Detach button when running and the console handle is valid
         DetachButton.IsEnabled = isRunning && ConsoleHostControl.ConsoleHandle != IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// Handles the Browse button click: saves the folder as a labeled entry
-    /// (paired with the session's name) and selects it.
-    /// </summary>
-    private void BrowseButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new System.Windows.Forms.FolderBrowserDialog
-        {
-            Description = "Select the working directory",
-            SelectedPath = _session.WorkingDirectory,
-            ShowNewFolderButton = true
-        };
-
-        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-        {
-            PathManager.AddEntry(dialog.SelectedPath, _session.Name);
-            SelectPathFor(dialog.SelectedPath);
-        }
     }
 
     /// <summary>
@@ -251,6 +242,10 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     /// <summary>
     /// Right-click lists saved folders so they can be removed.
     /// </summary>
+    /// <summary>
+    /// Right-click lists saved folders; each entry has Edit and Delete
+    /// sub-options. Editing opens the folder dialog pre-filled with the pair.
+    /// </summary>
     private void PathBox_RightClick(object sender, MouseButtonEventArgs e)
     {
         var menu = new ContextMenu();
@@ -259,15 +254,23 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
 
         foreach (var entry in PathManager.Entries)
         {
-            var item = new MenuItem
+            string oldPath = entry.Path;
+            var entryItem = new MenuItem { Header = entry.Name, ToolTip = entry.Path };
+
+            var editItem = new MenuItem { Header = "✏  Edit…" };
+            editItem.Click += (_, __) =>
             {
-                Header = $"Remove \"{entry.Name}\"",
-                Foreground = System.Windows.Media.Brushes.LightCoral,
-                ToolTip = entry.Path
+                var updated = AddEntryDialogs.PromptForFolder(Window.GetWindow(this), entry.Name, entry.Path, editMode: true);
+                if (updated != null)
+                    PathManager.UpdateEntry(oldPath, updated.Name, updated.Path);
             };
-            string captured = entry.Path;
-            item.Click += (_, __) => PathManager.RemoveEntry(captured);
-            menu.Items.Add(item);
+
+            var deleteItem = new MenuItem { Header = "🗑  Delete" };
+            deleteItem.Click += (_, __) => PathManager.RemoveEntry(oldPath);
+
+            entryItem.Items.Add(editItem);
+            entryItem.Items.Add(deleteItem);
+            menu.Items.Add(entryItem);
         }
 
         if (PathManager.Entries.Count == 0)
@@ -565,69 +568,17 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     }
 
     /// <summary>
-    /// Handles dropdown selections: picking an agent sets it for this session;
-    /// the "Add new entry" item opens the add dialog instead.
+    /// Handles dropdown selections: picking an agent sets it for this session.
+    /// Agents are added, edited and removed from the header combo.
     /// </summary>
     private void AgentCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.AddedItems.Count == 0) return;
 
-        if (e.AddedItems[0] is ComboBoxItem item && ReferenceEquals(item, _addAgentItem))
-        {
-            var name = AddEntryDialogs.PromptForAgent(Window.GetWindow(this));
-            if (name != null)
-            {
-                AgentManager.AddAgent(name); // no-op when it already exists
-                SelectAgent(name);
-                _session.AgentName = name;
-            }
-            else
-            {
-                AgentCombo.SelectedItem = _lastAgent;
-            }
-            return;
-        }
-
         if (e.AddedItems[0] is string agent)
         {
-            _lastAgent = agent;
             _session.AgentName = agent;
         }
-    }
-
-    /// <summary>
-    /// Right-click lists agents so they can be removed.
-    /// </summary>
-    private void AgentCombo_RightClick(object sender, MouseButtonEventArgs e)
-    {
-        var menu = new ContextMenu();
-        menu.Foreground = System.Windows.Media.Brushes.White;
-        menu.Background = new SolidColorBrush(Color.FromRgb(45, 45, 45));
-
-        foreach (var agent in AgentManager.Agents)
-        {
-            var item = new MenuItem
-            {
-                Header = $"Remove \"{agent}\"",
-                Foreground = System.Windows.Media.Brushes.LightCoral
-            };
-            string captured = agent;
-            item.Click += (_, __) =>
-            {
-                AgentManager.RemoveAgent(captured);
-                if (string.Equals(_session.AgentName, captured, StringComparison.OrdinalIgnoreCase))
-                {
-                    SelectAgent(null);
-                    _session.AgentName = "opencode";
-                    SelectAgent(_session.AgentName);
-                }
-            };
-            menu.Items.Add(item);
-        }
-
-        AgentCombo.ContextMenu = menu;
-        menu.IsOpen = true;
-        e.Handled = true;
     }
 
     /// <summary>
@@ -642,56 +593,5 @@ public partial class SessionControl : System.Windows.Controls.UserControl, INoti
     private void CloseSessionButton_Click(object sender, RoutedEventArgs e)
     {
         CloseRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// Handles the session name text box getting focus (select all text).
-    /// </summary>
-    private void SessionNameBox_GotFocus(object sender, RoutedEventArgs e)
-    {
-        SessionNameBox.SelectAll();
-    }
-
-    /// <summary>
-    /// Handles the session name text box losing focus.
-    /// </summary>
-    private void SessionNameBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        CommitSessionName();
-    }
-
-    /// <summary>
-    /// Handles Enter key to commit session name.
-    /// </summary>
-    private void SessionNameBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            CommitSessionName();
-            Keyboard.ClearFocus();
-            e.Handled = true;
-        }
-    }
-
-    /// <summary>
-    /// Commits the session name from the text box to the model.
-    /// Also updates the saved name if the current path is a saved entry.
-    /// </summary>
-    private void CommitSessionName()
-    {
-        string name = SessionNameBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = "Session";
-            SessionNameBox.Text = name;
-        }
-        _session.Name = name;
-
-        // If the current folder has a saved entry, update its label
-        string path = _session.WorkingDirectory.Trim();
-        if (!string.IsNullOrWhiteSpace(path) && PathManager.TryGetName(path) != null)
-        {
-            PathManager.UpdateName(path, name);
-        }
     }
 }

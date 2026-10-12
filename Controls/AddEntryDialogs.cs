@@ -68,15 +68,17 @@ public static class AddEntryDialogs
 
     /// <summary>
     /// Asks for a label + folder pair. Returns null when cancelled.
+    /// Pass <paramref name="initialFolder"/> and <paramref name="editMode"/> to edit.
     /// </summary>
-    public static SavedPathEntry? PromptForFolder(Window owner, string suggestedLabel)
+    public static SavedPathEntry? PromptForFolder(Window owner,
+        string? initialLabel = null, string? initialFolder = null, bool editMode = false)
     {
-        var dlg = MakeWindow(owner, "Add saved folder");
+        string title = editMode ? "Edit saved folder" : "Add saved folder";
+        var dlg = MakeWindow(owner, title);
         var panel = new StackPanel { Margin = new Thickness(16) };
 
         panel.Children.Add(MakeLabel("Label"));
         var labelBox = MakeTextBox("LabelTextBox");
-        labelBox.Text = suggestedLabel;
         panel.Children.Add(labelBox);
 
         panel.Children.Add(MakeLabel("Folder"));
@@ -87,6 +89,11 @@ public static class AddEntryDialogs
         DockPanel.SetDock(browseButton, Dock.Right);
         folderRow.Children.Add(folderBox);
         panel.Children.Add(folderRow);
+
+        if (!string.IsNullOrWhiteSpace(initialFolder))
+            folderBox.Text = initialFolder;
+        if (!string.IsNullOrWhiteSpace(initialLabel))
+            labelBox.Text = initialLabel;
 
         var buttonRow = new StackPanel
         {
@@ -116,9 +123,16 @@ public static class AddEntryDialogs
         okButton.Click += (_, _) =>
         {
             string folder = folderBox.Text.Trim();
+            string label = labelBox.Text.Trim();
+            if (label.Length == 0)
+            {
+                MessageBox.Show(dlg, "Please enter a label.", title,
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             if (folder.Length == 0)
             {
-                MessageBox.Show(dlg, "Please enter or browse a folder.", "Add saved folder",
+                MessageBox.Show(dlg, "Please enter or browse a folder.", title,
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -126,13 +140,13 @@ public static class AddEntryDialogs
             {
                 var create = MessageBox.Show(dlg,
                     $"The folder does not exist:\n{folder}\n\nCreate it now?",
-                    "Add saved folder", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    title, MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (create != MessageBoxResult.Yes) return;
                 try { Directory.CreateDirectory(folder); }
                 catch (Exception ex)
                 {
                     MessageBox.Show(dlg, $"Could not create the folder:\n{ex.Message}",
-                        "Add saved folder", MessageBoxButton.OK, MessageBoxImage.Error);
+                        title, MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
             }
@@ -144,27 +158,25 @@ public static class AddEntryDialogs
         dlg.ShowDialog();
         if (!confirmed) return null;
 
-        string label = labelBox.Text.Trim();
-        string folder2 = folderBox.Text.Trim();
-        if (label.Length == 0)
-        {
-            label = Path.GetFileName(folder2.TrimEnd('\\', '/'));
-            if (label.Length == 0) label = folder2;
-        }
-        return new SavedPathEntry { Name = label, Path = folder2 };
+        return new SavedPathEntry { Name = labelBox.Text.Trim(), Path = folderBox.Text.Trim() };
     }
 
     /// <summary>
-    /// Asks for a new agent command name. Returns null when cancelled.
+    /// Asks for a new agent command name, or edits an existing one.
+    /// Returns null when cancelled.
     /// </summary>
-    public static string? PromptForAgent(Window owner)
+    public static string? PromptForAgent(Window owner, string? initialName = null, bool editMode = false)
     {
-        var dlg = MakeWindow(owner, "Add agent");
+        string title = editMode ? "Edit agent" : "Add agent";
+        var dlg = MakeWindow(owner, title);
         var panel = new StackPanel { Margin = new Thickness(16) };
 
         panel.Children.Add(MakeLabel("Agent name (a command found on PATH)"));
         var nameBox = MakeTextBox("AgentTextBox");
         panel.Children.Add(nameBox);
+
+        if (!string.IsNullOrWhiteSpace(initialName))
+            nameBox.Text = initialName;
 
         panel.Children.Add(new TextBlock
         {
@@ -195,7 +207,7 @@ public static class AddEntryDialogs
             string name = nameBox.Text.Trim();
             if (name.Length == 0)
             {
-                MessageBox.Show(dlg, "Please enter an agent name.", "Add agent",
+                MessageBox.Show(dlg, "Please enter an agent name.", title,
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -203,7 +215,7 @@ public static class AddEntryDialogs
             {
                 MessageBox.Show(dlg,
                     "Only letters, digits and . _ - : / \\ are allowed —\nspaces and shell characters are rejected for safety.",
-                    "Add agent", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    title, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             confirmed = true;

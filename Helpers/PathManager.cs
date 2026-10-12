@@ -59,6 +59,30 @@ public static class PathManager
         return removed;
     }
 
+    /// <summary>
+    /// Raised after an entry was edited: (snapshot of the old entry, the updated entry).
+    /// </summary>
+    public static event Action<SavedPathEntry, SavedPathEntry>? EntryEdited;
+
+    /// <summary>
+    /// Updates an entry's label and folder (matched by its old path).
+    /// </summary>
+    public static bool UpdateEntry(string oldPath, string newLabel, string newFolder)
+    {
+        newLabel = newLabel.Trim();
+        newFolder = newFolder.Trim();
+        var entry = _entries.FirstOrDefault(e =>
+            e.Path.Equals(oldPath, StringComparison.OrdinalIgnoreCase));
+        if (entry == null || newLabel.Length == 0 || newFolder.Length == 0) return false;
+
+        var oldSnapshot = new SavedPathEntry { Name = entry.Name, Path = entry.Path };
+        entry.Name = newLabel;
+        entry.Path = newFolder;
+        EntryEdited?.Invoke(oldSnapshot, entry);
+        Save();
+        return true;
+    }
+
     public static string? TryGetName(string path)
     {
         return _entries.FirstOrDefault(e =>

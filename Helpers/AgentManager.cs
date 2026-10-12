@@ -74,6 +74,43 @@ public static class AgentManager
     }
 
     /// <summary>
+    /// Raised after an agent was renamed: (old name, new name).
+    /// </summary>
+    public static event Action<string, string>? AgentRenamed;
+
+    /// <summary>
+    /// Renames an agent, keeping its position in the list.
+    /// Fails when the new name is invalid or already taken.
+    /// </summary>
+    public static bool RenameAgent(string oldName, string newName)
+    {
+        newName = newName.Trim();
+        if (!IsValidAgentName(newName)) return false;
+
+        int idx = -1;
+        for (int i = 0; i < _agents.Count; i++)
+        {
+            if (string.Equals(_agents[i], oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) return false;
+
+        for (int i = 0; i < _agents.Count; i++)
+        {
+            if (i != idx && string.Equals(_agents[i], newName, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        _agents[idx] = newName;
+        AgentRenamed?.Invoke(oldName, newName);
+        Save();
+        return true;
+    }
+
+    /// <summary>
     /// Loads the agent list from disk, or populates defaults if no saved list exists.
     /// </summary>
     public static void Load()

@@ -6,11 +6,90 @@
              StartupUri="MainWindow.xaml">
     <Application.Resources>
 
-        <!-- Saved folders show their label; the full path is in the tooltip.
+        <!-- Saved folders show their full path; the label is in the tooltip.
              Lives at app level so popup items find it. -->
         <DataTemplate DataType="{x:Type helpers:SavedPathEntry}">
-            <TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding Path}" ToolTip="{Binding Name}" TextTrimming="CharacterEllipsis" />
         </DataTemplate>
+
+        <!-- Dark context menus and menu items (default WPF menu chrome is
+             hardcoded light, which made submenus unreadable) -->
+        <Style TargetType="ContextMenu">
+            <Setter Property="Foreground" Value="#e0e0e0" />
+            <Setter Property="Background" Value="#2d2d2d" />
+            <Setter Property="BorderBrush" Value="#555" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Padding="4"
+                                MaxHeight="{TemplateBinding MaxHeight}">
+                            <ItemsPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="#e0e0e0" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Grid>
+                            <Border x:Name="Bd" Background="Transparent" Padding="10,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                                    <Path x:Name="RightArrow"
+                                          Grid.Column="1"
+                                          Data="M0,0 L4,4 L0,8 Z"
+                                          Fill="#aaa"
+                                          VerticalAlignment="Center"
+                                          Margin="10,0,0,0"
+                                          Visibility="Collapsed"
+                                          IsHitTestVisible="False" />
+                                </Grid>
+                            </Border>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Right"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border Background="#2d2d2d"
+                                        BorderBrush="#555"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Margin="2,0,0,0"
+                                        Padding="4">
+                                    <ItemsPresenter />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2d5d8d" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#777" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="RightArrow" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <!-- Dark popup item: readable text, blue hover highlight -->
         <Style TargetType="ComboBoxItem">

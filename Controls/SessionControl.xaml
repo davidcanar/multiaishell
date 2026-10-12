@@ -34,7 +34,6 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <!-- Status indicator (gray when stopped, green when running) -->
@@ -47,22 +46,21 @@
                         VerticalAlignment="Center"
                         ToolTip="Stopped" />
 
-                <!-- Editable session name -->
+                <!-- Session label (read-only: edited via the folder dropdown's Edit option) -->
                 <TextBox x:Name="SessionNameBox"
                          Grid.Column="1"
                          Text="Session"
+                         IsReadOnly="True"
+                         Background="Transparent"
                          Foreground="#ddd"
-                         Background="#3d3d3d"
-                         BorderBrush="#555"
-                         BorderThickness="1"
+                         BorderBrush="Transparent"
+                         BorderThickness="0"
                          FontSize="13"
                          FontWeight="SemiBold"
                          Padding="4,2"
                          VerticalAlignment="Center"
                          TextWrapping="NoWrap"
-                         GotFocus="SessionNameBox_GotFocus"
-                         LostFocus="SessionNameBox_LostFocus"
-                         KeyDown="SessionNameBox_KeyDown" />
+                         ToolTip="Session label (edit it via the folder dropdown: right-click → Edit)" />
 
                 <!-- Saved-folder combo (select-only; "Add new entry" opens a dialog) -->
                 <ComboBox x:Name="PathBox"
@@ -77,36 +75,20 @@
                           SelectionChanged="PathBox_SelectionChanged"
                           MouseRightButtonUp="PathBox_RightClick" />
 
-                <!-- Browse button -->
-                <Button x:Name="BrowseButton"
-                        Grid.Column="3"
-                        Content="..."
-                        Width="28"
-                        Height="22"
-                        Margin="4,0,0,0"
-                        FontSize="12"
-                        FontWeight="Bold"
-                        Foreground="#ccc"
-                        Background="#3d3d3d"
-                        BorderBrush="#555"
-                        ToolTip="Browse for folder"
-                        Click="BrowseButton_Click" />
-
-                <!-- Agent selector (select-only; "Add new entry" opens a dialog) -->
+                <!-- Agent selector (select-only; agents are added/edited from the header combo) -->
                 <ComboBox x:Name="AgentCombo"
-                          Grid.Column="4"
+                          Grid.Column="3"
                           Width="105"
                           Height="22"
                           Margin="4,0,4,0"
                           FontSize="12"
                           BorderBrush="#555"
-                          ToolTip="Select a coding agent. Right-click to remove entries."
-                          SelectionChanged="AgentCombo_SelectionChanged"
-                          MouseRightButtonUp="AgentCombo_RightClick" />
+                          ToolTip="Select a coding agent. Add, edit or remove agents from the header combo (right-click)."
+                          SelectionChanged="AgentCombo_SelectionChanged" />
 
                 <!-- Launch button -->
                 <Button x:Name="LaunchButton"
-                        Grid.Column="5"
+                        Grid.Column="4"
                         Content="▶"
                         Padding="8,3"
                         Margin="0,0,4,0"
@@ -120,7 +102,7 @@
 
                 <!-- Stop button -->
                 <Button x:Name="StopButton"
-                        Grid.Column="6"
+                        Grid.Column="5"
                         Content="■"
                         Padding="8,3"
                         Margin="0,0,4,0"
@@ -135,7 +117,7 @@
 
                 <!-- Open in Explorer button -->
                 <Button x:Name="ExplorerButton"
-                        Grid.Column="7"
+                        Grid.Column="6"
                         Content="📂"
                         Padding="8,3"
                         Margin="0,0,4,0"
@@ -149,7 +131,7 @@
 
                 <!-- Detach button (pop out embedded console to separate window) -->
                 <Button x:Name="TerminalButton"
-                        Grid.Column="8"
+                        Grid.Column="7"
                         Content="🖥️"
                         Padding="8,3"
                         Margin="0,0,4,0"
@@ -163,7 +145,7 @@
 
                 <!-- Detach button (pop out embedded console to separate window) -->
                 <Button x:Name="DetachButton"
-                        Grid.Column="9"
+                        Grid.Column="8"
                         Content="🔗"
                         Padding="8,3"
                         Margin="0,0,0,0"
@@ -178,7 +160,7 @@
 
                 <!-- Close session button (stops the session and removes it from the grid) -->
                 <Button x:Name="CloseSessionButton"
-                        Grid.Column="10"
+                        Grid.Column="9"
                         Content="✕"
                         Width="24"
                         Padding="4,2"
