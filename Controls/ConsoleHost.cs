@@ -299,8 +299,8 @@ public class ConsoleHost : HwndHost
     /// <summary>
     /// Pastes the clipboard into the console's input buffer using WriteConsoleInput.
     /// This is the correct way to inject input into any console application.
-    /// Text is injected as key records; an image is staged as a PNG file and its
-    /// path is injected as a bracketed paste (see PasteImageFromClipboard).
+    /// Text is injected as a bracketed paste; an image is staged as a PNG file and
+    /// its path is injected as a bracketed paste (see PasteImageFromClipboard).
     /// </summary>
     public void PasteFromClipboard()
     {
@@ -311,9 +311,17 @@ public class ConsoleHost : HwndHost
                 string text = Clipboard.GetText();
                 if (string.IsNullOrEmpty(text)) return;
 
-                // Clipboard access must stay on this (STA UI) thread; everything else
-                // below runs on a worker so a long paste never freezes the window.
-                Task.Run(() => PasteText(text));
+                // Send the text as a bracketed paste (ESC[200~ ... ESC[201~), the
+                // same way a real terminal does. Agent TUIs (opencode/Claude,
+                // Bubbletea-based) enable bracketed paste and collapse the whole
+                // paste into a single event; injecting one key record per
+                // character instead makes them re-parse and re-render for every
+                // character, which is why large pastes crawl and land in chunks.
+                // allowEscape lets the markers through (control chars are stripped
+                // otherwise). Clipboard access must stay on this (STA UI) thread;
+                // everything below runs on a worker so a long paste never freezes
+                // the window.
+                Task.Run(() => PasteText(BracketedPaste(text), allowEscape: true));
                 return;
             }
 
